@@ -6,6 +6,8 @@
 
 ## Build και εκτέλεση
 
+Για εγκατάσταση πελάτη χωρίς κώδικα ή εντολές, δες τον [οδηγό Setup.exe για Windows](installer/README_EL.md). Το GitHub Actions παράγει self-contained installer και ελέγχει εγκατάσταση, αναβάθμιση και διατήρηση δεδομένων σε Windows.
+
 Απαιτείται .NET SDK 8.
 
 ```sh

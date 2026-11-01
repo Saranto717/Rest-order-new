@@ -1,0 +1,61 @@
+name: Windows customer installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'RestaurantOrders_Mobile_WiFi_Source/**'
+      - 'installer/**'
+      - '.github/workflows/windows-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/MellonRegression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/VivaRegression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/InstallationRegression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Ensure Inno Setup is installed
+        shell: pwsh
+        run: |
+          if (!(Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress --yes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build self-contained Setup.exe
+        shell: powershell
+        run: ./installer/windows/Build-Installer.ps1
+      - name: Install, upgrade and uninstall on Windows
+        shell: powershell
+        run: ./installer/windows/Test-Installer.ps1 -SetupPath ./artifacts/installer/RestaurantOrders-Setup-17.3.0-win-x64.exe
+      - name: Upload customer installer
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: RestaurantOrders-Setup-win-x64
+          path: |
+            artifacts/installer/*.exe
+            artifacts/installer/*.sha256
+            installer/windows/Customer-Guide-EL.txt
+          if-no-files-found: error
+          retention-days: 90
+      - name: Download link
+        shell: pwsh
+        run: |
+          "## Customer installer" >> $env:GITHUB_STEP_SUMMARY
+          "[Download Setup.exe and customer instructions](${{ steps.upload.outputs.artifact-url }})" >> $env:GITHUB_STEP_SUMMARY

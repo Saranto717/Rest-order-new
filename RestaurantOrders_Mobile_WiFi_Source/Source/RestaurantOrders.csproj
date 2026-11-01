@@ -26,4 +26,11 @@
     <PackageReference Include="System.Drawing.Common" Version="8.0.18" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Update="**/*.db;**/*.db-shm;**/*.db-wal;**/*.sqlite;**/*.log;appsettings.Local.json;appsettings.*.local.json"
+             CopyToPublishDirectory="Never" />
+    <None Update="**/*.db;**/*.db-shm;**/*.db-wal;**/*.sqlite;**/*.log;appsettings.Local.json;appsettings.*.local.json"
+          CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

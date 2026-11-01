@@ -21,3 +21,4 @@ appsettings.*.local.json
 *.log
 *.zip
 publish/
+artifacts/

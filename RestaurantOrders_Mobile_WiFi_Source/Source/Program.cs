@@ -7,15 +7,24 @@ using RestaurantOrders.Models;
 using RestaurantOrders.Services;
 using System.Security.Claims;
 using System.Text;
+using RestaurantOrders.Infrastructure;
 
-var builder = WebApplication.CreateBuilder(args);
+if (InstalledApplication.HandleImport(args)) return;
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService()
+        ? AppContext.BaseDirectory : null
+});
+var installedDataDirectory = InstalledApplication.Configure(builder);
 
 // Enable legacy code pages used by ESC/POS printers (e.g. Windows-1253).
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 // Επιτρέπει στην εφαρμογή να τρέχει σαν Windows Service (όταν εγκατασταθεί ως τέτοια),
 // χωρίς να επηρεάζει καθόλου το κανονικό `dotnet run` σε development.
-builder.Host.UseWindowsService();
+builder.Host.UseWindowsService(options => options.ServiceName = "RestaurantOrders");
 
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=restaurant.db"));
@@ -96,6 +105,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
+
+if (installedDataDirectory is not null)
+    app.MapGet("/health/ready", () => Results.Text("ready"));
 
 // ---- Login / Logout endpoints (πλαίσιο εκτός Blazor circuit) ----
 
