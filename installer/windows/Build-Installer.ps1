@@ -12,7 +12,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Self-contained publish failed.' }
 $forbidden = Get-ChildItem $publish -Recurse -File | Where-Object {
     $_.Extension -in @('.cs', '.razor', '.csproj', '.sln', '.pdb', '.db', '.sqlite', '.log') -or $_.Name -match '\.db-(wal|shm)$'
 }
-if ($forbidden) { throw 'Publish contains source code, a database, debugging symbols or local logs.' }
+if ($forbidden) { throw ('Publish contains forbidden files: ' + (($forbidden | ForEach-Object { $_.FullName.Substring($publish.Length + 1) }) -join ', ')) }
 $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
 if (!(Test-Path $compiler)) { throw 'Install Inno Setup 6 before building the installer.' }
 & $compiler "/DPublishDir=$publish" "/DOutputDir=$output" "/DAppVersion=$Version" (Join-Path $PSScriptRoot 'RestaurantOrders.iss')

@@ -39,10 +39,24 @@ jobs:
           }
       - name: Build self-contained Setup.exe
         shell: powershell
-        run: ./installer/windows/Build-Installer.ps1
+        run: |
+          try {
+            ./installer/windows/Build-Installer.ps1 *>&1 | Tee-Object -Variable buildOutput
+          } catch {
+            "## Installer build error" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            ('```text' + "`n" + ($buildOutput -join "`n") + "`n" + $_.Exception.Message + "`n" + $_.ScriptStackTrace + "`n" + '```') | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            throw
+          }
       - name: Install, upgrade and uninstall on Windows
         shell: powershell
-        run: ./installer/windows/Test-Installer.ps1 -SetupPath ./artifacts/installer/RestaurantOrders-Setup-17.3.0-win-x64.exe
+        run: |
+          try {
+            ./installer/windows/Test-Installer.ps1 -SetupPath ./artifacts/installer/RestaurantOrders-Setup-17.3.0-win-x64.exe *>&1 | Tee-Object -Variable smokeOutput
+          } catch {
+            "## Installer smoke-test error" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            ('```text' + "`n" + ($smokeOutput -join "`n") + "`n" + $_.Exception.Message + "`n" + $_.ScriptStackTrace + "`n" + '```') | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            throw
+          }
       - name: Upload customer installer
         id: upload
         uses: actions/upload-artifact@v4
