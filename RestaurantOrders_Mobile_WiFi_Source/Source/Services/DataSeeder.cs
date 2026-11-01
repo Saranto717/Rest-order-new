@@ -9,6 +9,7 @@ public static class DataSeeder
     public static void Seed(AppDbContext db)
     {
         db.Database.EnsureCreated();
+        EnsureTableTransferSchema(db);
         EnsureParochosSchemaCompatibility(db);
         EnsureBankPosSchema(db);
 
@@ -23,6 +24,20 @@ public static class DataSeeder
             });
             db.SaveChanges();
         }
+    }
+
+    private static void EnsureTableTransferSchema(AppDbContext db)
+    {
+        db.Database.ExecuteSqlRaw(@"CREATE TABLE IF NOT EXISTS TableTransfers (
+            Id TEXT NOT NULL PRIMARY KEY, SourceOrderId INTEGER NOT NULL, TargetOrderId INTEGER NULL,
+            SourceTableId INTEGER NOT NULL, TargetTableId INTEGER NOT NULL, RequestedByUserId INTEGER NOT NULL,
+            SourceName TEXT NOT NULL, TargetName TEXT NOT NULL, AccountFingerprint TEXT NOT NULL,
+            ProviderRequired INTEGER NOT NULL, SourceMarksJson TEXT NOT NULL DEFAULT '[]', SourceItemIdsJson TEXT NOT NULL DEFAULT '[]', TargetMarksJson TEXT NOT NULL DEFAULT '[]',
+            SourceBalance TEXT NOT NULL DEFAULT '0', TargetBalance TEXT NOT NULL DEFAULT '0', Stage INTEGER NOT NULL,
+            LastError TEXT NULL, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL
+        );");
+        AddColumnIfMissing(db, "TableTransfers", "SourceItemIdsJson", "TEXT NOT NULL DEFAULT '[]'");
+        db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_TableTransfers_Stage_SourceTableId_TargetTableId ON TableTransfers(Stage, SourceTableId, TargetTableId)");
     }
 
     /// <summary>

@@ -26,9 +26,76 @@ public class AppDbContext : DbContext
     public DbSet<InvoiceSeries> InvoiceSeries => Set<InvoiceSeries>();
     public DbSet<FiscalOrderDocument> FiscalOrderDocuments => Set<FiscalOrderDocument>();
     public DbSet<FiscalOrderCancellation> FiscalOrderCancellations => Set<FiscalOrderCancellation>();
+    public DbSet<TableTransfer> TableTransfers => Set<TableTransfer>();
+
+    // Only the transfer service may finalize the records locked by its own journal.
+    internal bool FinalizingTableTransfer { get; set; }
+
+    public Task<bool> HasPendingTableTransferAsync(int orderId) => Orders
+        .Where(o => o.Id == orderId)
+        .AnyAsync(o => TableTransfers.Any(t => t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected &&
+            (t.SourceTableId == o.RestaurantTableId || t.TargetTableId == o.RestaurantTableId)));
+
+    private void CheckTransferLocks()
+    {
+        if (FinalizingTableTransfer) return;
+        ChangeTracker.DetectChanges();
+        var orders = new HashSet<int>();
+        var tables = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
+        {
+            if (entry.Entity is Order order)
+            {
+                if (order.Id > 0) orders.Add(order.Id);
+                tables.Add(order.RestaurantTableId);
+                if (entry.State != EntityState.Added) tables.Add(entry.OriginalValues.GetValue<int>(nameof(Order.RestaurantTableId)));
+            }
+            else if (entry.Entity is RestaurantTable table && entry.State != EntityState.Added) tables.Add(table.Id);
+            else if (entry.Entity is OrderItem item) orders.Add(item.OrderId);
+            else if (entry.Entity is OrderPayment payment) orders.Add(payment.OrderId);
+            else if (entry.Entity is OrderPrintBatch batch) orders.Add(batch.OrderId);
+            else if (entry.Entity is FiscalOrderDocument document) orders.Add(document.OrderId);
+            else if (entry.Entity is FiscalOrderCancellation cancellation) orders.Add(cancellation.OrderId);
+            else if (entry.Entity is FiscalOrderDocumentItem documentItem)
+            {
+                var id = documentItem.OrderItemId;
+                foreach (var orderId in OrderItems.Where(i => i.Id == id).Select(i => i.OrderId)) orders.Add(orderId);
+            }
+            else if (entry.Entity is OrderPaymentItem paymentItem)
+            {
+                foreach (var orderId in OrderPayments.Where(p => p.Id == paymentItem.OrderPaymentId).Select(p => p.OrderId)) orders.Add(orderId);
+            }
+            if (entry.State != EntityState.Added && entry.Metadata.FindProperty("OrderId")?.ClrType == typeof(int))
+                orders.Add(entry.OriginalValues.GetValue<int>("OrderId"));
+        }
+        if (orders.Count == 0 && tables.Count == 0) return;
+        foreach (var id in Orders.Where(o => orders.Contains(o.Id)).Select(o => o.RestaurantTableId)) tables.Add(id);
+        if (TableTransfers.Any(t => t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected &&
+            (tables.Contains(t.SourceTableId) || tables.Contains(t.TargetTableId))))
+            throw new InvalidOperationException("Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από αλλαγές ή πληρωμές.");
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        using var transaction = Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
+        CheckTransferLocks();
+        var result = base.SaveChanges(acceptAllChangesOnSuccess);
+        transaction?.Commit();
+        return result;
+    }
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = Database.CurrentTransaction is null ? await Database.BeginTransactionAsync(cancellationToken) : null;
+        CheckTransferLocks();
+        var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<TableTransfer>().HasIndex(t => new { t.Stage, t.SourceTableId, t.TargetTableId });
         modelBuilder.Entity<MenuCategory>()
             .HasOne(c => c.PrinterStation)
             .WithMany()

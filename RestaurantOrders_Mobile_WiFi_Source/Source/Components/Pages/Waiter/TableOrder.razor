@@ -9,6 +9,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject FiscalDocumentService Fiscal
+@inject TableTransferService Transfers
 @inject EpayWebEcrService Epay
 @inject MellonWebEcrService Mellon
 @inject EdpsWebEcrService Edps
@@ -16,6 +17,9 @@
 @inject AadeRegistryService AadeRegistry
 
 <style>
+    .table-transfer-box { width:min(95vw,520px); max-width:520px; max-height:90dvh; overflow-y:auto; }
+    .table-transfer-box select { width:100%; padding:10px; margin:12px 0; }
+    .table-transfer-box button { margin:8px 0; }
     /* Back to tables: keep the framed button look, not a default/visited hyperlink. */
     button.nav-button {
         display: inline-flex;
@@ -1102,6 +1106,8 @@
                     @oncontextmenu='(e) => OpenActionButtonCustomization("close", e)'
                     @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true"
                     @onclick="() => { showPaymentModal = true; closeStep = 1; }">Κλείσιμο τραπεζιού</button>
+            <button class="close-btn order-action-btn" disabled="@(sendingToKitchen || epayBusy || cancellationInProgress || wholeOrderCancellationInProgress || tableTransferBusy)"
+                    @onclick="BeginTableTransfer">Μεταφορά όλων σε άλλο τραπέζι</button>
             <p class="action-button-color-hint">🎨 Δεξί κλικ σε ένα από τα παραπάνω κουμπιά για να αλλάξεις τα χρώματά του.</p>
 
             @if (showPaymentModal)
@@ -1641,7 +1647,119 @@
 
 </div>
 
+@if (showTableTransferModal)
+{
+    <div class="pin-overlay" style="z-index:10000" role="dialog" aria-modal="true" aria-labelledby="table-transfer-title">
+        <div class="pin-box table-transfer-box">
+            <h3 id="table-transfer-title">Μεταφορά παραγγελίας</h3>
+            @if (pendingTableTransfer is not null)
+            {
+                <p>@pendingTableTransfer.SourceName → @pendingTableTransfer.TargetName</p>
+                <p class="hint">Η μεταφορά εκκρεμεί. Τα δύο τραπέζια παραμένουν δεσμευμένα μέχρι να επιβεβαιωθεί το αποτέλεσμα.</p>
+                <button disabled="@tableTransferBusy" @onclick="RecheckTableTransfer">@(tableTransferBusy ? "Έλεγχος…" : "Επανέλεγχος μεταφοράς")</button>
+                <button class="linkbtn-plain" disabled="@tableTransferBusy" @onclick='() => Nav.NavigateTo("/waiter")'>Πίσω στα τραπέζια</button>
+            }
+            else
+            {
+                <p>Μεταφορά όλων των ειδών από <strong>@tableName</strong>.</p>
+                <label for="transfer-table">Τραπέζι προορισμού</label>
+                <select id="transfer-table" @bind="tableTransferTargetId" disabled="@tableTransferBusy">
+                    <option value="0">Επίλεξε τραπέζι…</option>
+                    @foreach (var target in tableTransferTargets)
+                    {
+                        <option value="@target.Id">@target.Name @(occupiedTransferTargets.Contains(target.Id) ? "— συγχώνευση με υπάρχουσα παραγγελία" : "— ελεύθερο")</option>
+                    }
+                </select>
+                <p class="hint">Το αρχικό τραπέζι θα ελευθερωθεί. Σε κατειλημμένο προορισμό θα ενωθούν οι παραγγελίες. Διατηρούνται τα υπάρχοντα δελτία και δεν εκδίδεται απόδειξη ή νέα χρέωση.</p>
+                <p class="hint">Η μεταφορά δεν υποστηρίζει παραγγελίες με ήδη καταχωρισμένη πληρωμή ή δεσμευμένη υπογραφή.</p>
+                <button disabled="@(tableTransferBusy || tableTransferTargetId == 0)" @onclick="ConfirmTableTransfer">@(tableTransferBusy ? "Μεταφορά…" : "Μεταφορά όλων των ειδών")</button>
+                <button class="linkbtn-plain" disabled="@tableTransferBusy" @onclick="() => showTableTransferModal = false">Άκυρο</button>
+            }
+            @if (!string.IsNullOrWhiteSpace(tableTransferMessage)) { <p class="error" role="alert">@tableTransferMessage</p> }
+        </div>
+    </div>
+}
+
 @code {
+    private bool showTableTransferModal;
+    private bool tableTransferBusy;
+    private int tableTransferTargetId;
+    private string? tableTransferMessage;
+    private TableTransfer? pendingTableTransfer;
+    private List<RestaurantTable> tableTransferTargets = new();
+    private HashSet<int> occupiedTransferTargets = new();
+
+    private async Task<bool> EnsureCurrentTableAvailable()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        pendingTableTransfer = await db.TableTransfers.AsNoTracking().FirstOrDefaultAsync(t =>
+            t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected &&
+            (t.SourceTableId == TableId || t.TargetTableId == TableId));
+        if (pendingTableTransfer is not null)
+        {
+            tableTransferMessage = pendingTableTransfer.LastError;
+            showTableTransferModal = true;
+            return false;
+        }
+        if (!await db.Orders.AnyAsync(o => o.Id == order.Id && o.RestaurantTableId == TableId && o.Status == OrderStatus.Open))
+        {
+            Nav.NavigateTo("/waiter");
+            return false;
+        }
+        return true;
+    }
+
+    private async Task BeginTableTransfer()
+    {
+        if (!await EnsureCurrentTableAvailable()) return;
+        using var db = await DbFactory.CreateDbContextAsync();
+        var locked = await db.TableTransfers.Where(t => t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected)
+            .Select(t => new { t.SourceTableId, t.TargetTableId }).ToListAsync();
+        var lockedIds = locked.SelectMany(t => new[] { t.SourceTableId, t.TargetTableId }).ToHashSet();
+        tableTransferTargets = (await db.Tables.Where(t => t.IsActive && t.Id != TableId).OrderBy(t => t.SortOrder).ThenBy(t => t.Name).ToListAsync())
+            .Where(t => !lockedIds.Contains(t.Id)).ToList();
+        occupiedTransferTargets = (await db.Orders.Where(o => o.Status == OrderStatus.Open && (o.Items.Any(i => !i.IsCancelled && i.Quantity > 0) ||
+                db.FiscalOrderDocuments.Any(f => f.OrderId == o.Id && f.Mark != null && !f.IsCancelled)))
+            .Select(o => o.RestaurantTableId).ToListAsync()).ToHashSet();
+        tableTransferTargetId = 0; tableTransferMessage = null; showTableTransferModal = true;
+    }
+
+    private async Task ConfirmTableTransfer()
+    {
+        if (tableTransferBusy || tableTransferTargetId <= 0) return;
+        tableTransferBusy = true;
+        try { await HandleTransferResult(await Transfers.MoveAllAsync(order.Id, tableTransferTargetId, currentUserId)); }
+        catch (Exception) { tableTransferMessage = "Η μεταφορά δεν επιβεβαιώθηκε λόγω σφάλματος σύνδεσης ή αποθήκευσης. Ανανέωσε τη σελίδα και έλεγξε τυχόν εκκρεμή μεταφορά πριν συνεχίσεις."; }
+        finally { tableTransferBusy = false; }
+    }
+
+    private async Task RecheckTableTransfer()
+    {
+        if (tableTransferBusy || pendingTableTransfer is null) return;
+        tableTransferBusy = true;
+        try { await HandleTransferResult(await Transfers.RecheckAsync(pendingTableTransfer.Id)); }
+        catch (Exception) { tableTransferMessage = "Δεν ολοκληρώθηκε ο επανέλεγχος. Η εκκρεμής μεταφορά διατηρείται· δοκίμασε τον επανέλεγχο ξανά όταν αποκατασταθεί η σύνδεση."; }
+        finally { tableTransferBusy = false; }
+    }
+
+    private async Task HandleTransferResult(TableTransferResult result)
+    {
+        tableTransferMessage = result.Message;
+        if (result.Success) { Nav.NavigateTo($"/waiter/table/{result.TargetTableId}", forceLoad: true); return; }
+        if (result.Pending && result.TransferId is not null)
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+            pendingTableTransfer = await db.TableTransfers.AsNoTracking().FirstOrDefaultAsync(t => t.Id == result.TransferId);
+        }
+        else if (pendingTableTransfer is not null)
+        {
+            var wasSource = pendingTableTransfer.SourceTableId == TableId;
+            pendingTableTransfer = null;
+            if (!wasSource) { Nav.NavigateTo("/waiter"); return; }
+            await BeginTableTransfer(); tableTransferMessage = result.Message;
+        }
+    }
+
     private static List<PrinterStation> GetCategoryPrinters(MenuCategory? category)
     {
         if (category is null) return new List<PrinterStation>();
@@ -2203,6 +2321,12 @@
 
 
 
+        pendingTableTransfer = await db.TableTransfers.AsNoTracking().FirstOrDefaultAsync(t =>
+            t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected &&
+            (t.SourceTableId == TableId || t.TargetTableId == TableId));
+        if (pendingTableTransfer is not null)
+        { showTableTransferModal = true; tableTransferMessage = pendingTableTransfer.LastError; }
+
         var table = await db.Tables.FindAsync(TableId);
 
 
@@ -2326,6 +2450,11 @@
 
 
 
+        if (existing is null && pendingTableTransfer is not null)
+        {
+            order = new Order { RestaurantTableId = TableId, WaiterUserId = currentUserId };
+            return;
+        }
         if (existing is null)
 
 
@@ -2451,6 +2580,9 @@
 
     private async Task SelectItem(MenuItem item)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         // Εάν το προϊόν έχει extra συνδεδεμένα με την κατηγορία του,
         // ζητάμε πρώτα επιλογή. Διαφορετικά προστίθεται άμεσα όπως πριν.
         var availableExtras = allExtras
@@ -2697,6 +2829,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 
@@ -2976,6 +3111,9 @@
 
     private async Task HandleOrderItemTap(OrderItem item)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         if (suppressNextOrderItemTap)
         {
             suppressNextOrderItemTap = false;
@@ -2998,6 +3136,9 @@
 
     private async Task DecreasePendingOrderItemByOne(OrderItem item)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         if (item.IsPrinted || item.IsCancelled)
             return;
 
@@ -3017,6 +3158,9 @@
 
     private async Task RemoveItemFromPendingOrder(OrderItem oi)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         // Όσο το είδος δεν έχει σταλεί, το Χ το αφαιρεί άμεσα από τα προς αποστολή.
         // Αν έχει ήδη σταλεί, κρατάμε την υπάρχουσα διαδικασία φορολογικής ακύρωσης.
         if (oi.IsPrinted)
@@ -3103,6 +3247,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 
@@ -3534,6 +3681,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 
@@ -3810,6 +3960,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         if (sendingToKitchen)
             return;
 
@@ -4669,6 +4822,9 @@
     }
     private async Task ReprintOrder()
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         using var db = await DbFactory.CreateDbContextAsync();
 
         var activeItems = await db.OrderItems
@@ -4750,6 +4906,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 
@@ -5594,6 +5753,9 @@
     private async Task IssueSelectedPayment(FiscalDocumentKind kind)
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
         fiscalError = null;
 
@@ -5739,6 +5901,9 @@
 
     private async Task StartSelectedEpayPayment(bool isSplit)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         var isMellon = IsSelectedMellonWebEcr;
         if (isMellon && !string.IsNullOrWhiteSpace(cardTransactionId))
         {
@@ -5856,6 +6021,9 @@
 
     private async Task StartSelectedVivaPayment(bool isSplit)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         if (epayBusy) return;
         if (!string.IsNullOrWhiteSpace(cardTransactionId))
         {
@@ -5958,6 +6126,9 @@
 
     private async Task StartSelectedEdpsPayment(bool isSplit)
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
         if (epayBusy) return;
         if (edpsStatusCheckRequired)
         {
@@ -6290,6 +6461,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 
@@ -6858,6 +7032,9 @@
 
 
     {
+        using var tableLease = await TableOperationCoordinator.EnterAsync(TableId);
+        if (!await EnsureCurrentTableAvailable()) return;
+
 
 
 

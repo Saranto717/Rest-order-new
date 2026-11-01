@@ -59,6 +59,7 @@ builder.Services.AddHttpClient("AADE-Registry");
 builder.Services.AddSingleton<ParochosService>();
 builder.Services.AddTransient<AadeRegistryService>();
 builder.Services.AddScoped<FiscalDocumentService>();
+builder.Services.AddScoped<TableTransferService>();
 
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

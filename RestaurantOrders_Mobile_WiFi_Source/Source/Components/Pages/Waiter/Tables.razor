@@ -152,7 +152,7 @@
 
                     <span class="tname">@t.Name</span>
                     <span class="tamount">
-                        @FormatTotal(total)
+                        @(pendingTransferTables.Contains(t.Id) ? "Εκκρεμής μεταφορά" : FormatTotal(total))
                     </span>
 
                 </button>
@@ -179,7 +179,7 @@
 
                     <span class="tname">@t.Name</span>
                     <span class="tamount">
-                        @FormatTotal(total)
+                        @(pendingTransferTables.Contains(t.Id) ? "Εκκρεμής μεταφορά" : FormatTotal(total))
                     </span>
 
                 </button>
@@ -237,6 +237,7 @@
     private List<RestaurantTable> tables = new();
     private List<TableArea> areas = new();
     private Dictionary<int, decimal> totalsByTable = new();
+    private HashSet<int> pendingTransferTables = new();
 
     private int selectedAreaId = 0;
 
@@ -254,6 +255,10 @@
     protected override async Task OnInitializedAsync()
     {
         using var db = await DbFactory.CreateDbContextAsync();
+
+        var pending = await db.TableTransfers.Where(t => t.Stage != TableTransferStage.Completed && t.Stage != TableTransferStage.Rejected)
+            .Select(t => new { t.SourceTableId, t.TargetTableId }).ToListAsync();
+        pendingTransferTables = pending.SelectMany(t => new[] { t.SourceTableId, t.TargetTableId }).ToHashSet();
 
         tables = await db.Tables
             .Where(t => t.IsActive)

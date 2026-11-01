@@ -29,6 +29,7 @@ dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/VivaRegression/Vi
 
 ## Οδηγίες
 
+- [Μεταφορά ολόκληρης παραγγελίας και συγχώνευση τραπεζιών](RestaurantOrders_Mobile_WiFi_Source/Source/TABLE_TRANSFER_EL.md)
 - [Ενσωμάτωση Viva και αναβάθμιση v17.2](VIVA_INTEGRATION_V17_2_EL.md)
 - [Ρυθμίσεις Viva Cloud Terminal](RestaurantOrders_Mobile_WiFi_Source/Source/VIVA_CLOUD_TERMINAL_SETUP_EL.md)
 - [Ρυθμίσεις Mellon ανά POS](MELLON_MULTIBANK_PATCH_EL.md)

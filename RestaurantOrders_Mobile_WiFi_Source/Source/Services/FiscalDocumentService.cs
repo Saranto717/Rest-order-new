@@ -52,6 +52,9 @@ public sealed class FiscalDocumentService
         FiscalDocumentKind kind,
         BankPosTerminalSettings? selectedPos = null)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new CardPaymentPreparation { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var pos = selectedPos ?? await GetDefaultWebEcrPosAsync(db);
         if (CommonWebEcrProviderProfile.IsCommonRest(pos))
         {
@@ -198,6 +201,9 @@ public sealed class FiscalDocumentService
         FiscalDocumentKind kind,
         string? cardTransactionId = null)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var settings = await GetSettingsAsync(db);
         if (settings is { UseParochosProvider: false })
         {
@@ -672,6 +678,9 @@ public sealed class FiscalDocumentService
         int orderItemId,
         string reason = "Ακύρωση είδους από τον σερβιτόρο")
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var settings = await GetSettingsAsync(db);
         if (settings is null)
             return new FiscalIssueResult { Success = false, ErrorMessage = "Δεν έχουν ρυθμιστεί οι φορολογικές ρυθμίσεις." };
@@ -780,6 +789,9 @@ public sealed class FiscalDocumentService
         List<OrderItem> items,
         List<FiscalOrderDocument> correlatedForms)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var settings = (await GetSettingsAsync(db))!;
         var series = await GetOrCreateSeriesAsync(db, FiscalDocumentKind.OrderForm, settings.OrderFormSeriesName);
         var thisNumber = series.NextNumber;
@@ -981,6 +993,9 @@ public sealed class FiscalDocumentService
         // Χωρίς πάροχο ή χωρίς φορολογικά Order Forms, η ακύρωση γίνεται μόνο τοπικά.
         if (!settings.UseParochosProvider || !settings.IssueOrderFormsToAade)
         {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
             foreach (var item in activeItems)
             {
                 item.IsCancelled = true;
@@ -1142,6 +1157,9 @@ public sealed class FiscalDocumentService
         FiscalDocumentKind kind,
         BankPosTerminalSettings? selectedPos = null)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new CardPaymentPreparation { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var items = selectedItems.Where(i => !i.IsCancelled && i.Quantity > 0).ToList();
         var pos = selectedPos ?? await GetDefaultWebEcrPosAsync(db);
         if (CommonWebEcrProviderProfile.IsCommonRest(pos))
@@ -1545,6 +1563,9 @@ public sealed class FiscalDocumentService
         string? paymentSeriesName = null,
         long? paymentInvoiceNumber = null)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var items = selectedItems.Where(i => !i.IsCancelled && i.Quantity > 0).ToList();
         if (items.Count == 0)
             return new FiscalIssueResult { Success = false, ErrorMessage = "Δεν επιλέχθηκαν ενεργά είδη για πληρωμή." };
@@ -1626,6 +1647,12 @@ public sealed class FiscalDocumentService
         if (originalOrderForm is null)
             return new FiscalIssueResult { Success = false, ErrorMessage = "Δεν βρέθηκε το αρχικό δελτίο παραγγελίας του τραπεζιού. Δεν εκδόθηκε απόδειξη ώστε να αποφευχθεί ασύνδετο παραστατικό." };
 
+        // A merged party has original tickets from more than one table. Preserve
+        // the established single-table split behavior, but correlate ALL transferred originals.
+        var originalForms = await db.TableTransfers.AnyAsync(t => t.Stage == TableTransferStage.Completed && t.TargetOrderId == order.Id)
+            ? await db.FiscalOrderDocuments.Where(f => f.OrderId == order.Id && f.Mark != null && !f.IsCancelled).OrderBy(f => f.Id).ToListAsync()
+            : new List<FiscalOrderDocument> { originalOrderForm };
+
         var invoice = new Dictionary<string, object?>
         {
             ["issuer"] = BuildIssuer(settings!),
@@ -1654,11 +1681,7 @@ public sealed class FiscalDocumentService
                 ["totalVatAmount"] = totals.Vat,
                 ["totalValue"] = totals.Gross
             },
-            // Each split receipt references the same initial table Order Form MARK.
-            ["correlatedInvoices"] = new List<object?>
-            {
-                new Dictionary<string, object?> { ["mark"] = originalOrderForm.Mark!.Value }
-            }
+            ["correlatedInvoices"] = originalForms.Select(f => (object?)new Dictionary<string, object?> { ["mark"] = f.Mark!.Value }).ToList()
         };
 
         _logger.LogInformation(
@@ -1693,25 +1716,29 @@ public sealed class FiscalDocumentService
             .Distinct()
             .ToList();
 
-        var connect = await _parochos.ConnectDocumentsAsync(
-            settings,
-            originalOrderForm.ProcessId,
-            originalOrderForm.ExternalSystemId,
-            marksToConnect);
-
-        _logger.LogInformation(
-            "SPLIT RECEIPT CONNECT RESULT >>> OrderFormMark={OrderFormMark}, ReceiptMark={ReceiptMark}, SubmittedMarks={SubmittedMarks}, Success={Success}, ErrorCode={ErrorCode}, Error={Error}",
-            originalOrderForm.Mark, result.Mark, string.Join(",", marksToConnect), connect.Success, connect.ErrorCode, connect.ErrorMessage);
-
-        if (!connect.Success)
+        foreach (var originalForm in originalForms)
         {
-            return new FiscalIssueResult
+            var connect = await _parochos.ConnectDocumentsAsync(
+                settings,
+                originalForm.ProcessId,
+                originalForm.ExternalSystemId,
+                marksToConnect);
+
+            _logger.LogInformation(
+                "SPLIT RECEIPT CONNECT RESULT >>> OrderFormMark={OrderFormMark}, ReceiptMark={ReceiptMark}, SubmittedMarks={SubmittedMarks}, Success={Success}, ErrorCode={ErrorCode}, Error={Error}",
+                originalForm.Mark, result.Mark, string.Join(",", marksToConnect), connect.Success, connect.ErrorCode, connect.ErrorMessage);
+
+            if (!connect.Success)
             {
-                Success = false,
-                Mark = result.Mark,
-                QrCode = result.QrCode,
-                ErrorMessage = "Η απόδειξη εκδόθηκε (MARK " + result.Mark + "), αλλά η σύνδεση με το ΑΡΧΙΚΟ δελτίο παραγγελίας (MARK " + originalOrderForm.Mark + ") απέτυχε: " + connect.ErrorMessage
-            };
+                return new FiscalIssueResult
+                {
+                    Success = false,
+                    Mark = result.Mark,
+                    QrCode = result.QrCode,
+                    ErrorMessage = "Η απόδειξη εκδόθηκε (MARK " + result.Mark + "), αλλά η σύνδεση με το ΑΡΧΙΚΟ δελτίο παραγγελίας (MARK " + originalForm.Mark + ") απέτυχε: " + connect.ErrorMessage
+                };
+            }
+
         }
 
         var paymentRecord = new OrderPayment
@@ -1778,6 +1805,9 @@ public sealed class FiscalDocumentService
 
     public async Task<FiscalIssueResult> IssueOrderFormAsync(AppDbContext db, Order order, List<OrderItem> newlyAddedItems)
     {
+        if (await db.HasPendingTableTransferAsync(order.Id))
+            return new FiscalIssueResult { Success = false, ErrorMessage = "Υπάρχει εκκρεμής μεταφορά τραπεζιού. Ολοκλήρωσε τον επανέλεγχο πριν από φορολογική ενέργεια ή πληρωμή." };
+
         var settings = await GetSettingsAsync(db);
         if (settings is null || !settings.UseParochosProvider || !settings.IssueOrderFormsToAade)
             return new FiscalIssueResult { Success = true, ProviderUsed = false };

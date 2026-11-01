@@ -30,6 +30,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/InstallationRegression
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project RestaurantOrders_Mobile_WiFi_Source/Tests/TableTransferRegression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Ensure Inno Setup is installed
         shell: pwsh
         run: |

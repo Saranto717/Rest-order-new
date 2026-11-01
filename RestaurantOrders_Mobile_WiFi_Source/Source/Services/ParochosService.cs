@@ -492,7 +492,7 @@ public sealed class ParochosService
                 settings,
                 "/api/pointOfService/ListDetails",
                 payload,
-                ParsePointOfServiceDetailsResult);
+                json => ParsePointOfServiceDetailsResult(json, pointOfService));
         }
         catch (Exception ex)
         {
@@ -694,7 +694,7 @@ public sealed class ParochosService
         };
     }
 
-    private static ParochosPointOfServiceResult ParsePointOfServiceDetailsResult(string json)
+    private static ParochosPointOfServiceResult ParsePointOfServiceDetailsResult(string json, string? expectedPointOfService = null)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -712,9 +712,12 @@ public sealed class ParochosService
 
         if (!root.TryGetProperty("data", out var data) ||
             data.ValueKind != JsonValueKind.Array)
-            return result;
+            return new ParochosPointOfServiceResult { Success = false, ErrorMessage = "Ο Parochos δεν επέστρεψε έγκυρη λίστα στοιχείων τραπεζιού." };
 
-        var first = data.EnumerateArray().FirstOrDefault();
+        var first = data.EnumerateArray().FirstOrDefault(row =>
+            expectedPointOfService is null || string.Equals(GetString(row, "pointOfService")?.Trim(), expectedPointOfService.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (first.ValueKind != JsonValueKind.Object && data.GetArrayLength() > 0)
+            return new ParochosPointOfServiceResult { Success = false, ErrorMessage = "Η λίστα Parochos δεν περιέχει το ζητούμενο τραπέζι. Δεν επιβεβαιώνεται κλείσιμο ή μεταφορά." };
         if (first.ValueKind == JsonValueKind.Object)
         {
             result = new ParochosPointOfServiceResult
