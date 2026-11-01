@@ -43,6 +43,9 @@ jobs:
           try {
             ./installer/windows/Build-Installer.ps1 *>&1 | Tee-Object -Variable buildOutput
           } catch {
+            $diagnostic = (($buildOutput | Select-Object -Last 18) -join "`n") + "`n" + $_.Exception.Message
+            $diagnostic = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Installer compiler::$diagnostic"
             "## Installer build error" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             ('```text' + "`n" + ($buildOutput -join "`n") + "`n" + $_.Exception.Message + "`n" + $_.ScriptStackTrace + "`n" + '```') | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             throw
@@ -53,6 +56,10 @@ jobs:
           try {
             ./installer/windows/Test-Installer.ps1 -SetupPath ./artifacts/installer/RestaurantOrders-Setup-17.3.0-win-x64.exe *>&1 | Tee-Object -Variable smokeOutput
           } catch {
+            $errorLog = Join-Path $env:ProgramData 'RestaurantOrders\installer-error.log'
+            $detail = if (Test-Path $errorLog) { (Get-Content $errorLog -Tail 8) -join "`n" } else { '' }
+            $diagnostic = ($_.Exception.Message + "`n" + $detail).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Installer smoke test::$diagnostic"
             "## Installer smoke-test error" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             ('```text' + "`n" + ($smokeOutput -join "`n") + "`n" + $_.Exception.Message + "`n" + $_.ScriptStackTrace + "`n" + '```') | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             throw
