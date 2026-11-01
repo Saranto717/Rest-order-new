@@ -4,6 +4,12 @@
 
 ## Λήψη έτοιμου installer
 
+**Για τον πελάτη:** κατέβασε απευθείας το [RestaurantOrders Setup 17.3.0 για Windows x64](https://github.com/Saranto717/Rest-order-new/releases/download/v17.3.0/RestaurantOrders-Setup-17.3.0-win-x64.exe) ή άνοιξε τη [σελίδα της έκδοσης](https://github.com/Saranto717/Rest-order-new/releases/tag/v17.3.0). Η δημόσια λήψη δεν απαιτεί λογαριασμό GitHub. Εκτέλεσε το `.exe`· δεν χρειάζεται αποσυμπίεση ή πηγαίος κώδικας.
+
+Η έκδοση προωθεί ακριβώς το ελεγμένο binary από επιτυχημένο Windows build, επαληθεύοντας το SHA256 και την ταύτιση των αρχείων εφαρμογής/συσκευασίας.
+
+### Εναλλακτική λήψη development artifacts
+
 1. Άνοιξε το [GitHub Actions: Windows customer installer](https://github.com/Saranto717/Rest-order-new/actions/workflows/windows-installer.yml).
 2. Επίλεξε την τελευταία **επιτυχημένη** εκτέλεση. Η εκτέλεση περιλαμβάνει build, regression tests και πραγματική εγκατάσταση/αναβάθμιση/απεγκατάσταση σε Windows runner.
 3. Κατέβασε το artifact **RestaurantOrders-Setup-win-x64** στο κάτω μέρος της σελίδας. Το GitHub απαιτεί σύνδεση για τη λήψη artifacts.

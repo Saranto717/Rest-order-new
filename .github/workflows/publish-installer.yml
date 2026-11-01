@@ -1,0 +1,56 @@
+name: Publish tested Windows installer
+
+on:
+  push:
+    tags: [v17.3.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v17.3.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: v17.3.0
+      - name: Download an already tested installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/windows-installer.yml/runs" \
+            -f status=success -f branch=main -f per_page=20 > successful-runs.json
+          run_id=$(jq -r '.workflow_runs[0].id // empty' successful-runs.json)
+          tested_sha=$(jq -r '.workflow_runs[0].head_sha // empty' successful-runs.json)
+          test -n "$run_id" && test -n "$tested_sha"
+          git merge-base --is-ancestor "$tested_sha" HEAD
+          # Promote the tested binary only if application, tests and packaging inputs match.
+          git diff --exit-code "$tested_sha" HEAD -- RestaurantOrders_Mobile_WiFi_Source installer/windows
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name RestaurantOrders-Setup-win-x64 --dir staging
+          echo "Promoting installer from successful Windows run $run_id ($tested_sha)."
+          echo "Validated Windows build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify checksum and publish direct downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup=$(find staging -type f -name 'RestaurantOrders-Setup-17.3.0-win-x64.exe' -print -quit)
+          test -n "$setup"
+          checksum="$setup.sha256"
+          test -f "$checksum"
+          (cd "$(dirname "$setup")" && sha256sum --check "$(basename "$checksum")")
+          guide=$(find staging -type f -name 'Customer-Guide-EL.txt' -print -quit)
+          test -n "$guide"
+          gh release create "$RELEASE_TAG" "$setup" "$checksum" "$guide" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title 'RestaurantOrders 17.3.0 — Windows Setup' \
+            --notes-file installer/Release-Notes-17.3.0.md
+          echo "[Download Setup.exe](https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/RestaurantOrders-Setup-17.3.0-win-x64.exe)" >> "$GITHUB_STEP_SUMMARY"
