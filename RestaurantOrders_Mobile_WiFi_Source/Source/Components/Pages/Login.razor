@@ -1,0 +1,78 @@
+@page "/login"
+@layout RestaurantOrders.Components.Layout.MainLayout
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<div class="userpick-wrap">
+    <h2>Σύνδεση Διαχειριστή</h2>
+
+    @if (HasError)
+    {
+        <p class="error">Λάθος κωδικός. Δοκίμασε ξανά.</p>
+    }
+
+    @if (selectedUser is null)
+    {
+        <div class="user-grid">
+            @foreach (var u in users)
+            {
+                <button class="user-tile" @onclick="() => SelectUser(u)">
+                    <span class="avatar">@Initials(u.FullName)</span>
+                    <span>@u.FullName</span>
+                </button>
+            }
+        </div>
+        @if (users.Count == 0)
+        {
+            <p class="hint">Δεν υπάρχει ακόμα κανένας διαχειριστής.</p>
+        }
+    }
+    else
+    {
+        <div class="login-box">
+            <h3>@selectedUser.FullName</h3>
+            <form method="post" action="/api/login">
+                <input type="hidden" name="userId" value="@selectedUser.Id" />
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                @if (selectedUser.HasCode)
+                {
+                    <label>Κωδικός</label>
+                    <input type="password" name="password" autocomplete="current-password" autofocus required />
+                }
+                <button type="submit">Είσοδος</button>
+            </form>
+            <button class="linkbtn-plain" @onclick="() => selectedUser = null">&larr; Πίσω</button>
+        </div>
+    }
+
+    <a class="admin-link nav-button" href="/">&larr; Αρχική</a>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private bool HasError => Error == "1";
+
+    private List<User> users = new();
+    private User? selectedUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        users = await db.Users.Where(u => u.IsActive && u.Role == Role.Admin).OrderBy(u => u.FirstName).ToListAsync();
+    }
+
+    private void SelectUser(User u) => selectedUser = u;
+
+    private static string Initials(string fullName)
+    {
+        var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        return parts.Length == 1 ? parts[0][..1].ToUpperInvariant()
+            : (parts[0][..1] + parts[^1][..1]).ToUpperInvariant();
+    }
+}

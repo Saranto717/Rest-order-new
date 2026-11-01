@@ -1,0 +1,457 @@
+@page "/admin/categories"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<style>
+    .printer-choice-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px 14px;
+        align-items: center;
+        padding: 9px 11px;
+        border: 1px solid #d8e1ed;
+        border-radius: 10px;
+        background: #f7faff;
+        min-width: 210px;
+    }
+    .printer-choice {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: .92rem;
+        white-space: nowrap;
+    }
+    .printer-choice input { accent-color: #587ca8; }
+    .printer-assignment-cell { min-width: 300px; }
+    .printer-assignment-cell .printer-choice-list { margin-bottom: 7px; }
+    .printer-assignment-save { white-space: nowrap; }
+    .multi-printer-help { color: #627187; font-size: .86rem; }
+    .inactive-category { background: #f7f7f8; color: #737b87; }
+    .category-name-editor { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:230px; }
+    .category-name-editor input { min-width:135px; max-width:220px; }
+    .category-status { display:inline-block; padding:3px 8px; border-radius:999px; font-size:.82rem; font-weight:600; margin-right:6px; }
+    .category-status.active { background:#e1f3e9; color:#286749; }
+    .category-status.inactive { background:#eceef1; color:#5f6875; }
+</style>
+
+<h2>Κατηγορίες Καταλόγου</h2>
+<p class="hint">
+    Κάθε κατηγορία μπορεί να δρομολογεί τα είδη της σε <b>έναν ή περισσότερους εκτυπωτές</b>,
+    όπως κουζίνα, μπαρ ή άλλο σταθμό. Μπορείς να επιλέξεις όσους εκτυπωτές χρειάζεσαι.
+    Ο χαρακτηρισμός εσόδων της κατηγορίας κληρονομείται από όλα τα είδη της.
+    Από εδώ μπορείς επίσης να μετονομάσεις κατηγορία ή να την απενεργοποιήσεις προσωρινά χωρίς διαγραφή.
+    Οι ανενεργές κατηγορίες δεν εμφανίζονται στη λήψη παραγγελίας και μπορούν να ενεργοποιηθούν ξανά.
+</p>
+
+<div class="admin-form">
+    <input @bind="newName" placeholder="Όνομα κατηγορίας" />
+    <div>
+        <div class="hint" style="margin-bottom:5px;">Εκτυπωτές νέας κατηγορίας</div>
+        <div class="printer-choice-list">
+            @if (printers.Count == 0)
+            {
+                <span class="hint">Πρόσθεσε πρώτα εκτυπωτές.</span>
+            }
+            @foreach (var p in printers)
+            {
+                <label class="printer-choice">
+                    <input type="checkbox" checked="@newPrinterIds.Contains(p.Id)" @onchange="e => ToggleNewPrinter(p.Id, e)" />
+                    @p.Name
+                </label>
+            }
+        </div>
+    </div>
+    <input @bind="newVatPercent" placeholder="ΦΠΑ %" style="width:80px" />
+    <select @bind="newIncomeClassification">
+        <option value="category1_1">Εμπορεύματα</option>
+        <option value="category1_2">Προϊόντα</option>
+        <option value="category1_3">Υπηρεσίες</option>
+    </select>
+    <button @onclick="Add">Προσθήκη</button>
+</div>
+
+@if (items.Count > 0)
+{
+    <div class="bulk-bar" style="align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <label><input type="checkbox" checked="@allSelected" @onchange="ToggleSelectAll" /> Επιλογή όλων των κατηγοριών</label>
+        <span>@selectedIds.Count επιλεγμένες</span>
+        <div>
+            <div class="hint" style="margin-bottom:5px;">Ανάθεση πολλών εκτυπωτών στις επιλεγμένες κατηγορίες</div>
+            <div class="printer-choice-list">
+                <label class="printer-choice">
+                    <input type="checkbox" checked="@(bulkPrinterIds.Count == 0)" @onchange="ToggleBulkNoPrinter" />
+                    Χωρίς εκτυπωτή
+                </label>
+                @foreach (var p in printers)
+                {
+                    <label class="printer-choice">
+                        <input type="checkbox" checked="@bulkPrinterIds.Contains(p.Id)" @onchange="e => ToggleBulkPrinter(p.Id, e)" />
+                        @p.Name
+                    </label>
+                }
+            </div>
+        </div>
+        <button @onclick="ApplyBulkPrinters" disabled="@(selectedIds.Count == 0)">Ανάθεση εκτυπωτών</button>
+        <button class="danger" @onclick="DeleteSelected" disabled="@(selectedIds.Count == 0)">Διαγραφή επιλεγμένων</button>
+    </div>
+}
+
+<table class="admin-table">
+    <thead>
+        <tr>
+            <th></th>
+            <th>Κατηγορία</th>
+            <th>Κατάσταση</th>
+            <th>Εκτυπωτές</th>
+            <th>ΦΠΑ %</th>
+            <th>Χαρακτηρισμός εσόδων</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var c in items)
+        {
+            <tr class="@(!c.IsActive ? "inactive-category" : "")">
+                <td><input type="checkbox" checked="@selectedIds.Contains(c.Id)" @onchange="e => ToggleSelect(c.Id, e)" /></td>
+                <td>
+                    <div class="category-name-editor">
+                        @if (editingCategoryId == c.Id)
+                        {
+                            <input @bind="editCategoryName" aria-label="Νέο όνομα κατηγορίας" />
+                            <button @onclick="() => SaveCategoryName(c)">Αποθήκευση</button>
+                            <button @onclick="CancelCategoryNameEdit">Άκυρο</button>
+                        }
+                        else
+                        {
+                            <strong>@c.Name</strong>
+                            <button @onclick="() => StartCategoryNameEdit(c)">Μετονομασία</button>
+                        }
+                    </div>
+                </td>
+                <td>
+                    <span class="category-status @(c.IsActive ? "active" : "inactive")">@(c.IsActive ? "Ενεργή" : "Ανενεργή")</span>
+                    <button @onclick="() => ToggleCategoryActive(c)">@(c.IsActive ? "Απενεργοποίηση" : "Ενεργοποίηση")</button>
+                </td>
+                <td class="printer-assignment-cell">
+                    <div class="printer-choice-list">
+                        @if (printers.Count == 0)
+                        {
+                            <span class="hint">Δεν υπάρχουν εκτυπωτές.</span>
+                        }
+                        @foreach (var p in printers)
+                        {
+                            <label class="printer-choice">
+                                <input type="checkbox"
+                                       checked="@GetCategoryPrinterIds(c.Id).Contains(p.Id)"
+                                       @onchange="e => ToggleCategoryPrinter(c.Id, p.Id, e)" />
+                                @p.Name
+                            </label>
+                        }
+                        @if (printers.Count > 0 && GetCategoryPrinterIds(c.Id).Count == 0)
+                        {
+                            <span class="multi-printer-help">Δεν έχει οριστεί εκτυπωτής</span>
+                        }
+                    </div>
+                    <button class="printer-assignment-save" @onclick="() => SaveCategoryPrinters(c.Id)">Αποθήκευση εκτυπωτών</button>
+                </td>
+                <td><input value="@c.VatPercent" @onchange="e => UpdateVat(c, e)" style="width:60px" /></td>
+                <td>
+                    <select value="@c.IncomeClassificationCategory" @onchange="e => UpdateIncomeClassification(c, e)">
+                        <option value="category1_1">Εμπορεύματα</option>
+                        <option value="category1_2">Προϊόντα</option>
+                        <option value="category1_3">Υπηρεσίες</option>
+                    </select>
+                    <div class="hint" style="margin-top:4px;">Εφαρμόζεται σε όλα τα είδη της κατηγορίας.</div>
+                </td>
+                <td><button class="danger" @onclick="() => Delete(c)">Διαγραφή</button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <p class="status">@statusMessage</p>
+}
+
+@code {
+    private List<MenuCategory> items = new();
+    private List<PrinterStation> printers = new();
+    private string newName = "";
+    private string newVatPercent = "24";
+    private string newIncomeClassification = "category1_1";
+    private HashSet<int> newPrinterIds = new();
+    private HashSet<int> bulkPrinterIds = new();
+    private HashSet<int> selectedIds = new();
+    private Dictionary<int, HashSet<int>> categoryPrinterSelections = new();
+    private string? statusMessage;
+    private int? editingCategoryId;
+    private string editCategoryName = "";
+    private bool allSelected => items.Count > 0 && selectedIds.Count == items.Count;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.MenuCategories
+            .Include(c => c.PrinterStation)
+            .Include(c => c.PrinterStations)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+        printers = await db.PrinterStations.OrderBy(p => p.Name).ToListAsync();
+
+        categoryPrinterSelections = items.ToDictionary(
+            c => c.Id,
+            c =>
+            {
+                var ids = c.PrinterStations.Select(p => p.Id).ToHashSet();
+                if (c.PrinterStationId.HasValue) ids.Add(c.PrinterStationId.Value);
+                return ids;
+            });
+
+        selectedIds.RemoveWhere(id => items.All(i => i.Id != id));
+        newPrinterIds.RemoveWhere(id => printers.All(p => p.Id != id));
+        bulkPrinterIds.RemoveWhere(id => printers.All(p => p.Id != id));
+    }
+
+    private HashSet<int> GetCategoryPrinterIds(int categoryId)
+    {
+        if (categoryPrinterSelections.TryGetValue(categoryId, out var ids)) return ids;
+        return new HashSet<int>();
+    }
+
+    private static bool IsChecked(ChangeEventArgs e) => e.Value is bool value && value;
+
+    private void ToggleNewPrinter(int printerId, ChangeEventArgs e)
+    {
+        if (IsChecked(e)) newPrinterIds.Add(printerId);
+        else newPrinterIds.Remove(printerId);
+    }
+
+    private void ToggleCategoryPrinter(int categoryId, int printerId, ChangeEventArgs e)
+    {
+        var ids = GetCategoryPrinterIds(categoryId);
+        if (IsChecked(e)) ids.Add(printerId);
+        else ids.Remove(printerId);
+        categoryPrinterSelections[categoryId] = ids;
+    }
+
+    private void ToggleBulkPrinter(int printerId, ChangeEventArgs e)
+    {
+        if (IsChecked(e)) bulkPrinterIds.Add(printerId);
+        else bulkPrinterIds.Remove(printerId);
+    }
+
+    private void ToggleBulkNoPrinter(ChangeEventArgs e)
+    {
+        if (IsChecked(e)) bulkPrinterIds.Clear();
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            statusMessage = "Συμπλήρωσε όνομα κατηγορίας.";
+            return;
+        }
+
+        if (!decimal.TryParse(newVatPercent.Replace(",", "."), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var vat))
+        {
+            statusMessage = "Το ποσοστό ΦΠΑ δεν είναι έγκυρο.";
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var selectedPrinters = await db.PrinterStations
+            .Where(p => newPrinterIds.Contains(p.Id))
+            .OrderBy(p => p.Name)
+            .ToListAsync();
+
+        db.MenuCategories.Add(new MenuCategory
+        {
+            Name = newName.Trim(),
+            PrinterStationId = selectedPrinters.FirstOrDefault()?.Id,
+            PrinterStations = selectedPrinters,
+            VatPercent = vat,
+            IncomeClassificationCategory = newIncomeClassification
+        });
+        await db.SaveChangesAsync();
+
+        newName = "";
+        newPrinterIds.Clear();
+        newVatPercent = "24";
+        newIncomeClassification = "category1_1";
+        statusMessage = "Η κατηγορία προστέθηκε.";
+        await Load();
+    }
+
+    private async Task SaveCategoryPrinters(int categoryId)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories
+            .Include(c => c.PrinterStations)
+            .FirstOrDefaultAsync(c => c.Id == categoryId);
+        if (entity is null) return;
+
+        var selectedIdsForCategory = GetCategoryPrinterIds(categoryId);
+        var selectedPrinters = await db.PrinterStations
+            .Where(p => selectedIdsForCategory.Contains(p.Id))
+            .OrderBy(p => p.Name)
+            .ToListAsync();
+
+        entity.PrinterStations.Clear();
+        foreach (var printer in selectedPrinters) entity.PrinterStations.Add(printer);
+        // Διατηρείται η παλιά στήλη ως συμβατότητα με παλαιότερες εκδόσεις και βάσεις.
+        entity.PrinterStationId = selectedPrinters.FirstOrDefault()?.Id;
+
+        await db.SaveChangesAsync();
+        statusMessage = selectedPrinters.Count == 0
+            ? $"Αφαιρέθηκαν οι εκτυπωτές από την κατηγορία '{entity.Name}'."
+            : $"Η κατηγορία '{entity.Name}' συνδέθηκε με: {string.Join(", ", selectedPrinters.Select(p => p.Name))}.";
+        await Load();
+    }
+
+    private void StartCategoryNameEdit(MenuCategory category)
+    {
+        editingCategoryId = category.Id;
+        editCategoryName = category.Name;
+    }
+
+    private void CancelCategoryNameEdit()
+    {
+        editingCategoryId = null;
+        editCategoryName = "";
+    }
+
+    private async Task SaveCategoryName(MenuCategory category)
+    {
+        var newName = editCategoryName.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            statusMessage = "Το όνομα της κατηγορίας δεν μπορεί να είναι κενό.";
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories.FindAsync(category.Id);
+        if (entity is not null)
+        {
+            entity.Name = newName;
+            await db.SaveChangesAsync();
+            statusMessage = $"Η κατηγορία μετονομάστηκε σε '{newName}'. Τα προϊόντα και οι αντιστοιχίσεις εκτυπωτών της διατηρήθηκαν.";
+        }
+
+        CancelCategoryNameEdit();
+        await Load();
+    }
+
+    private async Task ToggleCategoryActive(MenuCategory category)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories.FindAsync(category.Id);
+        if (entity is null) return;
+
+        entity.IsActive = !entity.IsActive;
+        await db.SaveChangesAsync();
+
+        statusMessage = entity.IsActive
+            ? $"Η κατηγορία '{entity.Name}' ενεργοποιήθηκε ξανά και θα εμφανίζεται στα τραπέζια."
+            : $"Η κατηγορία '{entity.Name}' απενεργοποιήθηκε. Δεν θα εμφανίζεται στις κατηγορίες κατά τη λήψη παραγγελίας. Τα προϊόντα και τα extra της διατηρούνται.";
+        await Load();
+    }
+
+    private async Task UpdateVat(MenuCategory c, ChangeEventArgs e)
+    {
+        if (!decimal.TryParse(e.Value?.ToString()?.Replace(",", "."), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var vat)) return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories.FindAsync(c.Id);
+        if (entity is not null)
+        {
+            entity.VatPercent = vat;
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task UpdateIncomeClassification(MenuCategory c, ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (value is not ("category1_1" or "category1_2" or "category1_3")) return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories.FindAsync(c.Id);
+        if (entity is not null)
+        {
+            entity.IncomeClassificationCategory = value;
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private void ToggleSelect(int id, ChangeEventArgs e)
+    {
+        if (IsChecked(e)) selectedIds.Add(id);
+        else selectedIds.Remove(id);
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        if (IsChecked(e)) selectedIds = items.Select(i => i.Id).ToHashSet();
+        else selectedIds.Clear();
+    }
+
+    private async Task ApplyBulkPrinters()
+    {
+        if (selectedIds.Count == 0) return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var toUpdate = await db.MenuCategories
+            .Include(c => c.PrinterStations)
+            .Where(c => selectedIds.Contains(c.Id))
+            .ToListAsync();
+        var selectedPrinters = await db.PrinterStations
+            .Where(p => bulkPrinterIds.Contains(p.Id))
+            .OrderBy(p => p.Name)
+            .ToListAsync();
+
+        foreach (var category in toUpdate)
+        {
+            category.PrinterStations.Clear();
+            foreach (var printer in selectedPrinters) category.PrinterStations.Add(printer);
+            category.PrinterStationId = selectedPrinters.FirstOrDefault()?.Id;
+        }
+
+        await db.SaveChangesAsync();
+        statusMessage = $"Οι εκτυπωτές ενημερώθηκαν σε {toUpdate.Count} κατηγορίες.";
+        await Load();
+    }
+
+    private async Task DeleteSelected()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var toDelete = await db.MenuCategories.Where(c => selectedIds.Contains(c.Id)).ToListAsync();
+        db.MenuCategories.RemoveRange(toDelete);
+        await db.SaveChangesAsync();
+        selectedIds.Clear();
+        statusMessage = "Οι επιλεγμένες κατηγορίες διαγράφηκαν.";
+        await Load();
+    }
+
+    private async Task Delete(MenuCategory c)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuCategories.FindAsync(c.Id);
+        if (entity is not null)
+        {
+            db.MenuCategories.Remove(entity);
+            await db.SaveChangesAsync();
+            statusMessage = $"Η κατηγορία '{c.Name}' διαγράφηκε.";
+        }
+        await Load();
+    }
+}

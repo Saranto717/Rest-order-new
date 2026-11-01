@@ -1,0 +1,67 @@
+@page "/admin/reports"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h2>Αναφορές Πωλήσεων</h2>
+<p class="hint">
+    Δείχνει είδη που έχουν πράγματι σταλεί/επιβεβαιωθεί (πατήθηκε "Αποστολή στην κουζίνα/μπαρ"),
+    ομαδοποιημένα ανά κατηγορία και είδος, για το διάστημα που θα διαλέξεις.
+</p>
+
+<div class="admin-form">
+    <label>Από:</label>
+    <input type="date" @bind="fromDate" />
+    <label>Έως:</label>
+    <input type="date" @bind="toDate" />
+    <button @onclick="RunReport">Προβολή</button>
+    <a class="export-btn" href="@ExportUrl" target="_blank">⬇ Εξαγωγή σε Excel</a>
+</div>
+
+@if (hasRun)
+{
+    if (!rows.Any())
+    {
+        <p class="hint">Δεν βρέθηκαν πωλήσεις σε αυτό το διάστημα.</p>
+    }
+    else
+    {
+        @foreach (var catGroup in rows.GroupBy(r => r.Category))
+        {
+            <h3>@catGroup.Key <span class="hint">(@catGroup.Sum(r => r.Quantity) τεμ. — €@catGroup.Sum(r => r.Revenue).ToString("0.00"))</span></h3>
+            <table class="admin-table">
+                <thead><tr><th>Είδος</th><th>Ποσότητα</th><th>Έσοδα</th></tr></thead>
+                <tbody>
+                    @foreach (var row in catGroup.OrderByDescending(r => r.Quantity))
+                    {
+                        <tr>
+                            <td>@row.ItemName</td>
+                            <td>@row.Quantity</td>
+                            <td>€@row.Revenue.ToString("0.00")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <p class="total"><strong>Γενικό σύνολο: @rows.Sum(r => r.Quantity) τεμ. — €@rows.Sum(r => r.Revenue).ToString("0.00")</strong></p>
+    }
+}
+
+@code {
+    private DateTime fromDate = DateTime.Today;
+    private DateTime toDate = DateTime.Today;
+    private List<Services.ReportRow> rows = new();
+    private bool hasRun;
+
+    private string ExportUrl => $"/api/reports/export?from={fromDate:yyyy-MM-dd}&to={toDate:yyyy-MM-dd}";
+
+    protected override async Task OnInitializedAsync() => await RunReport();
+
+    private async Task RunReport()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        rows = await Services.ReportService.GetSalesReport(db, fromDate, toDate);
+        hasRun = true;
+    }
+}

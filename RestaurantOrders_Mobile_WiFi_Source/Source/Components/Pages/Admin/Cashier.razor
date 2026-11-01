@@ -1,0 +1,226 @@
+@page "/admin/cashier"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@using System.Security.Claims
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject AuthenticationStateProvider AuthProvider
+@inject PrinterService Printer
+@inject IJSRuntime JS
+
+<h2>🧾 Ταμείο</h2>
+
+@if (!unlocked)
+{
+    <div class="login-box">
+        <h3>Επιβεβαίωση κωδικού</h3>
+        <p class="hint">Για λόγους ασφαλείας, ξαναγράψε τον κωδικό σου για να μπεις στο ταμείο.</p>
+        @if (pinError)
+        {
+            <p class="error">Λάθος κωδικός.</p>
+        }
+        <input type="password" @bind="enteredPin" @bind:event="oninput" placeholder="Κωδικός" />
+        <button @onclick="CheckPin">Είσοδος</button>
+    </div>
+}
+else
+{
+    <h3>Τρέχον Ταμείο</h3>
+    <p class="hint">Παραγγελίες που έχουν κλείσει από το τελευταίο "Κλείσιμο Ημέρας" μέχρι τώρα.</p>
+
+    @if (!currentRows.Any())
+    {
+        <p class="hint">Δεν υπάρχουν εκκρεμείς κλεισμένες παραγγελίες αυτή τη στιγμή.</p>
+    }
+    else
+    {
+        <table class="admin-table">
+            <thead><tr><th>Υπάλληλος</th><th>Μετρητά</th><th>Κάρτα</th><th>Σύνολο</th><th>Παραγγελίες</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var row in currentRows)
+                {
+                    <tr>
+                        <td>@row.EmployeeName</td>
+                        <td>€@row.CashTotal.ToString("0.00")</td>
+                        <td>€@row.CardTotal.ToString("0.00")</td>
+                        <td><strong>€@row.GrandTotal.ToString("0.00")</strong></td>
+                        <td>@row.OrderCount</td>
+                        <td><button @onclick="() => CloseEmployee(row.WaiterUserId, row.EmployeeName)">Κλείσιμο υπαλλήλου</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="total">
+            <strong>Γενικό σύνολο: €@currentRows.Sum(r => r.GrandTotal).ToString("0.00")</strong>
+        </p>
+    }
+
+    <div class="admin-form">
+        <select @bind="printerId">
+            <option value="0">-- Επιλογή εκτυπωτή για κλείσιμο (γενικό ή ανά υπάλληλο) --</option>
+            @foreach (var p in printers)
+            {
+                <option value="@p.Id">@p.Name</option>
+            }
+        </select>
+        <button class="danger" @onclick="CloseDay" disabled="@(!currentRows.Any())">Κλείσιμο Ημέρας (όλοι)</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <p class="status">@statusMessage</p>
+    }
+
+    <h3>Ιστορικό Κλεισιμάτων</h3>
+    <p class="hint">Κάθε "Κλείσιμο Ημέρας" εμφανίζεται ξεχωριστά (δεν αθροίζονται μεταξύ τους), ακόμα κι αν έγιναν πολλά την ίδια μέρα.</p>
+
+    <div class="admin-form">
+        <label>Ημερομηνία:</label>
+        <input type="date" @bind="selectedDate" @bind:after="LoadHistory" />
+    </div>
+
+    @if (!history.Any())
+    {
+        <p class="hint">Δεν υπάρχουν κλεισίματα για αυτή την ημερομηνία.</p>
+    }
+    else
+    {
+        @foreach (var record in history)
+        {
+            <div class="dayclose-card">
+                <h4>
+                    @(record.Employees.Count == 1 ? $"Κλείσιμο Υπαλλήλου: {record.Employees[0].EmployeeName}" : "Κλείσιμο Ημέρας")
+                    — @record.ClosedAt.ToString("HH:mm")
+                    <span class="hint">(από: @record.ClosedByName)</span>
+                </h4>
+                <table class="admin-table">
+                    <thead><tr><th>Υπάλληλος</th><th>Μετρητά</th><th>Κάρτα</th><th>Σύνολο</th><th>Παραγγελίες</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in record.Employees)
+                        {
+                            <tr>
+                                <td>@row.EmployeeName</td>
+                                <td>€@row.CashTotal.ToString("0.00")</td>
+                                <td>€@row.CardTotal.ToString("0.00")</td>
+                                <td><strong>€@row.GrandTotal.ToString("0.00")</strong></td>
+                                <td>@row.OrderCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="total"><strong>Σύνολο κλεισίματος: €@record.GrandTotal.ToString("0.00")</strong></p>
+                <a class="export-btn" href="/api/cashier/day-close-pdf?id=@record.Id" target="_blank">⬇ Λήψη PDF</a>
+            </div>
+        }
+    }
+}
+
+@code {
+    private bool unlocked;
+    private string enteredPin = "";
+    private bool pinError;
+
+    private List<Services.EmployeeSummary> currentRows = new();
+    private List<PrinterStation> printers = new();
+    private int printerId = 0;
+    private string? statusMessage;
+
+    private DateTime selectedDate = DateTime.Today;
+    private List<Services.DayCloseRecord> history = new();
+
+    private async Task CheckPin()
+    {
+        pinError = false;
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var userId = int.Parse(authState.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.FindAsync(userId);
+
+        if (user is null || (user.HasCode && !PasswordHasher.Verify(enteredPin, user.CodeHash!)))
+        {
+            pinError = true;
+            return;
+        }
+
+        unlocked = true;
+        printers = await db.PrinterStations.OrderBy(p => p.Name).ToListAsync();
+        await LoadCurrent();
+        await LoadHistory();
+    }
+
+    private async Task LoadCurrent()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        currentRows = await Services.CashierService.GetCurrentSummary(db);
+    }
+
+    private async Task LoadHistory()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        history = await Services.CashierService.GetClosingsForDate(db, selectedDate);
+    }
+
+    private async Task CloseEmployee(int waiterUserId, string employeeName)
+    {
+        statusMessage = null;
+
+        if (printerId == 0)
+        {
+            statusMessage = "Διάλεξε πρώτα εκτυπωτή.";
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Κλείσιμο ταμείου για {employeeName}; Οι υπόλοιποι υπάλληλοι δεν επηρεάζονται.");
+        if (!confirmed) return;
+
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var userId = int.Parse(authState.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var record = await Services.CashierService.PerformEmployeeClose(db, waiterUserId, userId);
+
+        var station = await db.PrinterStations.FindAsync(printerId);
+        if (station is not null)
+        {
+            var ok = await Printer.PrintDayCloseAsync(station, record);
+            statusMessage = ok
+                ? $"Το ταμείο του/της {employeeName} τυπώθηκε στον εκτυπωτή '{station.Name}'."
+                : $"⚠ Καταγράφηκε, αλλά απέτυχε η εκτύπωση στον '{station.Name}'.";
+        }
+
+        await LoadCurrent();
+        await LoadHistory();
+    }
+
+    private async Task CloseDay()
+    {
+        statusMessage = null;
+
+        if (printerId == 0)
+        {
+            statusMessage = "Διάλεξε πρώτα εκτυπωτή για να τυπωθεί το κλείσιμο.";
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Θέλετε όντως να κάνετε κλείσιμο ημέρας; Το τρέχον ταμείο θα καταγραφεί και θα μηδενιστεί.");
+        if (!confirmed) return;
+
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var userId = int.Parse(authState.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var record = await Services.CashierService.PerformDayClose(db, userId);
+
+        var station = await db.PrinterStations.FindAsync(printerId);
+        if (station is not null)
+        {
+            var ok = await Printer.PrintDayCloseAsync(station, record);
+            statusMessage = ok
+                ? $"Το κλείσιμο τυπώθηκε στον εκτυπωτή '{station.Name}'."
+                : $"⚠ Το κλείσιμο καταγράφηκε, αλλά απέτυχε η εκτύπωση στον '{station.Name}'.";
+        }
+
+        await LoadCurrent();
+        await LoadHistory();
+    }
+}

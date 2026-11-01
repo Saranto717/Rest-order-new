@@ -1,0 +1,323 @@
+@page "/admin/fiscal-settings"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ParochosService Parochos
+
+<h2>Ρυθμίσεις Παραστατικών (Parochos / ΑΑΔΕ)</h2>
+<p class="hint">
+    ⚠️ Αυτά τα στοιχεία επηρεάζουν πραγματικά φορολογικά παραστατικά. Επιβεβαίωσε με τον
+    λογιστή σου ή τον Parochos τους κωδικούς πριν χρησιμοποιήσεις το σύστημα σε πραγματικές
+    (μη-δοκιμαστικές) συναλλαγές. Ξεκίνα πάντα με το δοκιμαστικό (beta) περιβάλλον.
+</p>
+
+<h3>Στοιχεία Επιχείρησης (Εκδότης)</h3>
+<div class="admin-form quick-add-form">
+    <div class="form-row"><label>ΑΦΜ *</label><input @bind="s.VatNumber" /></div>
+    <div class="form-row"><label>Υποκατάστημα (αριθμός, 0 = έδρα)</label><input @bind="s.Branch" /></div>
+    <div class="form-row"><label>Επωνυμία</label><input @bind="s.CompanyName" /></div>
+    <div class="form-row"><label>ΔΟΥ (εκτύπωση)</label><input @bind="s.TaxOffice" placeholder="π.χ. Α’ Αθηνών" /></div>
+    <div class="form-row"><label>Κύρια δραστηριότητα (εκτύπωση)</label><input @bind="s.MainActivity" placeholder="π.χ. Υπηρεσίες εστίασης" /></div>
+    <div class="form-row"><label>Οδός</label><input @bind="s.Street" /></div>
+    <div class="form-row"><label>Αριθμός</label><input @bind="s.StreetNumber" /></div>
+    <div class="form-row"><label>Τ.Κ.</label><input @bind="s.PostalCode" /></div>
+    <div class="form-row"><label>Πόλη</label><input @bind="s.City" /></div>
+    <div class="form-row"><label>Τηλέφωνο</label><input @bind="s.ContactPhone" /></div>
+    <div class="form-row"><label>Email</label><input @bind="s.ContactEmail" /></div>
+</div>
+
+<h3>Λειτουργία παρόχου</h3>
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>
+            <input type="checkbox" @bind="s.UseParochosProvider" />
+            Χρήση παρόχου ηλεκτρονικής τιμολόγησης (Parochos)
+        </label>
+        <small class="hint">Αν απενεργοποιηθεί, οι παραγγελίες, οι πληρωμές, τα split και τα υπόλοιπα τραπεζιών συνεχίζουν να λειτουργούν τοπικά, χωρίς έκδοση φορολογικών παραστατικών μέσω παρόχου.</small>
+    </div>
+</div>
+
+<h3>Σύνδεση με Parochos</h3>
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>API Key (Subscription Key) *</label>
+        <input @bind="s.ParochosSubscriptionKey" placeholder="π.χ. 1EE21B81418434A851E7AF0CED9B28C" />
+    </div>
+    <div class="form-row">
+        <label>Username (email σύνδεσης Parochos)</label>
+        <input @bind="s.ParochosUsername" placeholder="user@example.com" />
+    </div>
+    <div class="form-row">
+        <label>Κωδικός</label>
+        <input @bind="s.ParochosPassword" type="password" />
+    </div>
+    <div class="form-row">
+        <label>Περιβάλλον</label>
+        <select @bind="s.ParochosUseProduction">
+            <option value="false">Δοκιμαστικό (beta) - συνιστάται μέχρι να επιβεβαιωθούν όλα</option>
+            <option value="true">Παραγωγικό (πραγματικές συναλλαγές)</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label>Transmission Type</label>
+        <select @bind="s.ParochosTransmissionType">
+            <option value="1">1 — Μετάδοση + PDF από Parochos</option>
+            <option value="5">5 — Αυτόματη μετάδοση χωρίς PDF</option>
+        </select>
+        <small class="hint">Το API v3 χρησιμοποιεί πάντα identifier = &quot;Parochos&quot;.</small>
+    </div>
+    <p class="hint">Οι ρυθμίσεις POS (φυσικό Terminal ID, Parochos NSP Code, ProviderId και στοιχεία σύνδεσης/διαχείρισης) ορίζονται ανά τερματικό στην καρτέλα «Τραπεζικά POS».</p>
+    <div class="form-row"><label>Special Invoice Category</label><input @bind="s.ParochosSpecialInvoiceCategory" /></div>
+</div>
+
+<h3>Κωδικοί ΑΑΔΕ (προχωρημένο - επιβεβαίωσε πριν την πραγματική χρήση)</h3>
+<div class="admin-form quick-add-form">
+    <div class="form-row"><label>Τύπος Απόδειξης</label><input @bind="s.ReceiptInvoiceType" /></div>
+    <div class="form-row"><label>Τύπος Τιμολογίου</label><input @bind="s.InvoiceInvoiceType" /></div>
+    <div class="form-row"><label>Κωδικός Πληρωμής "Μετρητά"</label>
+        <select @bind="s.CashPaymentTypeCode" data-testid="cash-payment-type-select">
+            <option value="3">3 - Μετρητά</option>
+            <option value="1">1 - Επαγγελματικός Λογαριασμός Πληρωμών Ημεδαπής</option>
+            <option value="2">2 - Επαγγελματικός Λογαριασμός Πληρωμών Αλλοδαπής</option>
+            <option value="4">4 - Επιταγή</option>
+            <option value="5">5 - Επί Πιστώσει</option>
+            <option value="6">6 - Web Banking</option>
+            <option value="8">8 - Άμεσες Πληρωμές IRIS</option>
+        </select>
+    </div>
+    @if (s.CashPaymentTypeCode != "3")
+    {
+        <p class="error" data-testid="cash-payment-type-warning">Προσοχή: στην ΑΑΔΕ ο τρόπος πληρωμής "Μετρητά" είναι ο κωδικός 3. Ο κωδικός @s.CashPaymentTypeCode δεν αντιστοιχεί σε μετρητά.</p>
+    }
+    <div class="form-row"><label>Κάρτα</label><span class="hint">Στο API v3 EFT-POS χρησιμοποιεί type = 7. Τα Terminal/NSP στοιχεία είναι παραπάνω.</span></div>
+</div>
+
+<h3>Δελτίο Παραγγελίας προς ΑΑΔΕ (προαιρετικό)</h3>
+<p class="hint">
+    ⚠️ Απενεργοποιημένο από προεπιλογή. Ενεργοποίησέ το μόνο αφού επιβεβαιώσεις με τον
+    Parochos τον σωστό κωδικό τύπου παραστατικού για "Δελτίο Παραγγελίας". Όταν είναι
+    ενεργό, κάθε "Αποστολή στην κουζίνα/μπαρ" εκδίδει επιπλέον ένα φορολογικό Δελτίο
+    Παραγγελίας, το οποίο συσχετίζεται αυτόματα με την τελική Απόδειξη/Τιμολόγιο στο
+    κλείσιμο του τραπεζιού.
+</p>
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>
+            <input type="checkbox" @bind="s.IssueOrderFormsToAade" />
+            Ενεργοποίηση έκδοσης Δελτίου Παραγγελίας
+        </label>
+    </div>
+    <div class="form-row"><label>Τύπος Δελτίου Παραγγελίας (invoiceType)</label><input @bind="s.OrderFormInvoiceType" placeholder="8.6" /></div>
+    <p class="hint">Η σειρά του Δελτίου Παραγγελίας και η σειρά του Ακυρωτικού Δελτίου Παραγγελίας ρυθμίζονται πλέον στον πίνακα «Σειρές Παραστατικών» παρακάτω.</p>
+</div>
+
+<div class="admin-form">
+    <button @onclick="Save">Αποθήκευση</button>
+    <button @onclick="TestConnection">Έλεγχος σύνδεσης με Parochos</button>
+</div>
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="@(statusIsError ? "error" : "success")">@statusMessage</p>
+}
+
+<h3>Σειρές Παραστατικών</h3>
+<p class="hint">
+    Κάθε σειρά έχει δικό της μετρητή. Η ενεργή σειρά χρησιμοποιείται για τις νέες εκδόσεις.
+    Αν ξαναενεργοποιήσεις μια παλιά σειρά, συνεχίζει από τον τελευταίο αριθμό της.
+</p>
+
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>Είδος παραστατικού</label>
+        <select @bind="newSeriesKind">
+            <option value="@FiscalDocumentKind.Receipt">Απόδειξη</option>
+            <option value="@FiscalDocumentKind.Invoice">Τιμολόγιο</option>
+            <option value="@FiscalDocumentKind.OrderForm">Δελτίο Παραγγελίας</option>
+            <option value="@FiscalDocumentKind.CancelOrderForm">Ακυρωτικό Δελτίο Παραγγελίας</option>
+            <option value="@FiscalDocumentKind.CreditReceipt">Πιστωτικό Στοιχείο Λιανικής (11.4)</option>
+            <option value="@FiscalDocumentKind.CreditInvoice">Πιστωτικό Τιμολόγιο (5.1)</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label>Νέα σειρά</label>
+        <input @bind="newSeriesName" placeholder="π.χ. ΑΑ-Ρ" />
+    </div>
+    <div class="form-row">
+        <button @onclick="CreateOrActivateSeries">Δημιουργία / Ενεργοποίηση σειράς</button>
+    </div>
+</div>
+
+<table class="admin-table">
+    <thead>
+        <tr>
+            <th>Είδος</th>
+            <th>Σειρά</th>
+            <th>Επόμενος αριθμός</th>
+            <th>Κατάσταση</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var series in allSeries)
+        {
+            <tr>
+                <td>@GetKindName(series.Kind)</td>
+                <td><strong>@series.SeriesName</strong></td>
+                <td>@series.NextNumber</td>
+                <td>@(series.IsActive ? "ΕΝΕΡΓΗ" : "Ανενεργή")</td>
+                <td>
+                    @if (!series.IsActive)
+                    {
+                        <button @onclick="() => ActivateSeries(series.Id)">Ενεργοποίηση</button>
+                    }
+                    else
+                    {
+                        <span class="success">✓ Χρησιμοποιείται</span>
+                    }
+                </td>
+            </tr>
+        }
+        @if (!allSeries.Any())
+        {
+            <tr><td colspan="5" class="hint">Θα δημιουργηθούν αυτόματα μόλις εκδοθεί το πρώτο παραστατικό.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private CompanySettings s = new();
+    private List<InvoiceSeries> allSeries = new();
+    private FiscalDocumentKind newSeriesKind = FiscalDocumentKind.Receipt;
+    private string newSeriesName = "";
+    private string? statusMessage;
+    private bool statusIsError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        s = await db.CompanySettings.FirstOrDefaultAsync() ?? new CompanySettings();
+        allSeries = await db.InvoiceSeries
+            .OrderBy(x => x.Kind)
+            .ThenByDescending(x => x.IsActive)
+            .ThenBy(x => x.SeriesName)
+            .ToListAsync();
+    }
+
+    private async Task Save()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.CompanySettings.FirstOrDefaultAsync();
+        if (existing is null)
+        {
+            db.CompanySettings.Add(s);
+        }
+        else
+        {
+            db.Entry(existing).CurrentValues.SetValues(s);
+        }
+        await db.SaveChangesAsync();
+        statusMessage = "Οι ρυθμίσεις αποθηκεύτηκαν.";
+        statusIsError = false;
+        await Load();
+    }
+
+    private async Task TestConnection()
+    {
+        await Save();
+        if (!s.UseParochosProvider)
+        {
+            statusIsError = false;
+            statusMessage = "Ο πάροχος είναι απενεργοποιημένος. Η δοκιμή σύνδεσης δεν εκτελέστηκε.";
+            return;
+        }
+        var (success, error) = await Parochos.TestConnectionAsync(s);
+        statusIsError = !success;
+        statusMessage = success
+            ? "✅ Επιτυχής σύνδεση με τον Parochos."
+            : $"❌ Αποτυχία σύνδεσης: {error}";
+    }
+
+    private async Task CreateOrActivateSeries()
+    {
+        var name = newSeriesName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            statusIsError = true;
+            statusMessage = "Πληκτρολόγησε όνομα σειράς.";
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.InvoiceSeries
+            .FirstOrDefaultAsync(x => x.Kind == newSeriesKind && x.SeriesName == name);
+
+        if (existing is null)
+        {
+            await db.InvoiceSeries
+                .Where(x => x.Kind == newSeriesKind)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IsActive, false));
+
+            db.InvoiceSeries.Add(new InvoiceSeries
+            {
+                Kind = newSeriesKind,
+                SeriesName = name,
+                NextNumber = 1,
+                IsActive = true
+            });
+
+            await db.SaveChangesAsync();
+            statusMessage = $"Δημιουργήθηκε η σειρά {name} και ξεκινά από ΑΑ 1.";
+        }
+        else
+        {
+            await db.InvoiceSeries
+                .Where(x => x.Kind == newSeriesKind && x.Id != existing.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IsActive, false));
+
+            existing.IsActive = true;
+            await db.SaveChangesAsync();
+            statusMessage = $"Η σειρά {name} ενεργοποιήθηκε και συνεχίζει από ΑΑ {existing.NextNumber}.";
+        }
+
+        statusIsError = false;
+        newSeriesName = "";
+        await Load();
+    }
+
+    private async Task ActivateSeries(int id)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var target = await db.InvoiceSeries.FirstOrDefaultAsync(x => x.Id == id);
+        if (target is null)
+        {
+            statusIsError = true;
+            statusMessage = "Η σειρά δεν βρέθηκε.";
+            return;
+        }
+
+        await db.InvoiceSeries
+            .Where(x => x.Kind == target.Kind && x.Id != target.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.IsActive, false));
+
+        target.IsActive = true;
+        await db.SaveChangesAsync();
+
+        statusIsError = false;
+        statusMessage = $"Ενεργοποιήθηκε η σειρά {target.SeriesName}. Επόμενος αριθμός: {target.NextNumber}.";
+        await Load();
+    }
+
+    private static string GetKindName(FiscalDocumentKind kind) => kind switch
+    {
+        FiscalDocumentKind.Receipt => "Απόδειξη",
+        FiscalDocumentKind.Invoice => "Τιμολόγιο",
+        FiscalDocumentKind.OrderForm => "Δελτίο Παραγγελίας",
+        FiscalDocumentKind.CancelOrderForm => "Ακυρωτικό Δελτίο Παραγγελίας",
+        FiscalDocumentKind.CreditReceipt => "Πιστωτικό Στοιχείο Λιανικής (11.4)",
+        FiscalDocumentKind.CreditInvoice => "Πιστωτικό Τιμολόγιο (5.1)",
+        _ => kind.ToString()
+    };
+}

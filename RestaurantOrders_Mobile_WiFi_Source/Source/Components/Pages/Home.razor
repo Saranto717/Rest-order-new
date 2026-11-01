@@ -1,0 +1,54 @@
+@page "/"
+@attribute [AllowAnonymous]
+@rendermode InteractiveServer
+@inject NavigationManager Nav
+
+@if (isAuthenticated)
+{
+    <p>Μεταφορά...</p>
+}
+else
+{
+    <div class="welcome-wrap">
+        <h1>Καλώς ορίσατε 👋</h1>
+        <p class="subtitle">Επίλεξε τι θέλεις να κάνεις</p>
+
+        <div class="welcome-menu">
+            <button type="button" class="welcome-btn order" @onclick='() => Nav.NavigateTo("/order-login", forceLoad: true)'>
+                <span class="icon">🧾</span>
+                <span>Πάρτε παραγγελία</span>
+            </button>
+
+            <button type="button" class="welcome-btn edit" @onclick='() => Nav.NavigateTo("/login", forceLoad: true)'>
+                <span class="icon">⚙️</span>
+                <span>Επεξεργασία προγράμματος</span>
+            </button>
+
+            <button type="button" class="welcome-btn adduser" @onclick='() => Nav.NavigateTo("/login?returnUrl=/admin/quick-add-user", forceLoad: true)'>
+                <span class="icon">➕</span>
+                <span>Προσθήκη χρηστών</span>
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private bool isAuthenticated;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = AuthStateTask is null ? null : await AuthStateTask;
+        var user = authState?.User;
+
+        if (user is not null && (user.Identity?.IsAuthenticated ?? false))
+        {
+            isAuthenticated = true;
+            if (user.IsInRole("Admin"))
+                Nav.NavigateTo("/admin/tables", forceLoad: true);
+            else
+                Nav.NavigateTo("/waiter", forceLoad: true);
+        }
+    }
+}

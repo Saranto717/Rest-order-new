@@ -1,0 +1,32 @@
+<div class="topbar">
+    <span class="brand">🍽️ Παραγγελιοληψία</span>
+
+    <AuthorizeView>
+        <Authorized>
+            <nav>
+                <AuthorizeView Roles="Waiter" Context="w">
+                    <a href="/waiter">Τραπέζια</a>
+                </AuthorizeView>
+
+                <AuthorizeView Roles="Admin" Context="a">
+                    <a href="/admin/tables">Τραπέζια</a>
+                    <a href="/admin/floorplan">Κάτοψη</a>
+                    <a href="/admin/printers">Εκτυπωτές</a>
+                    <a href="/admin/categories">Κατηγορίες</a>
+                    <a href="/admin/menu">Κατάλογος</a>
+                    <a href="/admin/extras">Extra</a>
+                    <a href="/admin/reports">Αναφορές</a>
+                    <a href="/admin/fiscal-settings">Παραστατικά</a>
+                    <a href="/admin/bank-pos">Τραπεζικά POS</a>
+                    <a href="/admin/issued-documents" data-testid="nav-issued-documents">Εκδοθείσες Αποδείξεις</a>
+                    <a href="/admin/users">Χρήστες</a>
+                </AuthorizeView>
+
+                <span class="userinfo">@context.User.Identity?.Name</span>
+                <form method="post" action="/api/logout" style="display:inline">
+                    <button type="submit" class="linkbtn">Αποσύνδεση</button>
+                </form>
+            </nav>
+        </Authorized>
+    </AuthorizeView>
+</div>

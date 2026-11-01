@@ -1,0 +1,8244 @@
+@page "/waiter/table/{TableId:int}"
+@attribute [Authorize(Roles = "Waiter,Admin")]
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using System.Text.Json
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject PrinterService Printer
+@inject AuthenticationStateProvider AuthProvider
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject FiscalDocumentService Fiscal
+@inject EpayWebEcrService Epay
+@inject MellonWebEcrService Mellon
+@inject EdpsWebEcrService Edps
+@inject VivaCloudTerminalService Viva
+@inject AadeRegistryService AadeRegistry
+
+<style>
+    /* Back to tables: keep the framed button look, not a default/visited hyperlink. */
+    button.nav-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 10px 16px;
+        border: 1px solid #d5dbe6;
+        border-radius: 12px;
+        background: #fff;
+        color: #1f2a44;
+        font-weight: 700;
+        text-decoration: none;
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+    }
+    button.nav-button:active { background: #eef2f8; }
+
+    /* Tap to add one; horizontal swipe is handled by pointer events. */
+    .order-list li.order-item-interactive {
+        cursor: pointer;
+        touch-action: pan-y;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .order-list li.order-item-interactive > span { pointer-events: none; }
+    .order-list li.order-item-interactive .remove-btn { touch-action: manipulation; }
+    .order-list li.order-item-interactive.pending { cursor: pointer; }
+    .order-list li.order-item-interactive.printed { cursor: default; }
+    /* Invoice modal - component local so it cannot be broken by global modal/input styles */
+    .pin-box.invoice-pin-box {
+        width: min(620px, calc(100vw - 32px));
+        max-height: min(88vh, 760px);
+        overflow-y: auto;
+        padding: 28px;
+        text-align: left;
+        box-sizing: border-box;
+    }
+
+    .invoice-pin-box .invoice-form {
+        width: 100%;
+        color: #202736;
+    }
+
+    .invoice-pin-box .invoice-form-header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 22px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid #e6e9ef;
+    }
+
+    .invoice-pin-box .invoice-form-icon {
+        width: 46px;
+        height: 46px;
+        flex: 0 0 46px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: #eef3ff;
+        color: #1f2a44;
+        font-size: 21px;
+    }
+
+    .invoice-pin-box .invoice-form-header h3 {
+        margin: 0 0 4px;
+        color: #1f2a44;
+        font-size: 1.2rem;
+        line-height: 1.2;
+        text-align: left;
+    }
+
+    .invoice-pin-box .invoice-form-header p {
+        margin: 0;
+        color: #70798a;
+        font-size: .86rem;
+        line-height: 1.45;
+        text-align: left;
+    }
+
+    .invoice-pin-box .invoice-field {
+        margin-bottom: 14px;
+    }
+
+        .invoice-pin-box .invoice-field label {
+            display: block;
+            margin: 0 0 6px;
+            color: #444d5e;
+            font-size: .79rem;
+            font-weight: 700;
+            text-align: left;
+        }
+
+            .invoice-pin-box .invoice-field label span {
+                color: #c0392b;
+            }
+
+    .invoice-pin-box .invoice-input,
+    .invoice-pin-box .vat-lookup-row input {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 10px 13px;
+        border: 1px solid #d2d7e0;
+        border-radius: 10px;
+        background: #fff;
+        color: #202736;
+        font: inherit;
+        font-size: .93rem;
+        outline: none;
+        transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+
+        .invoice-pin-box .invoice-input::placeholder,
+        .invoice-pin-box .vat-lookup-row input::placeholder {
+            color: #a0a7b4;
+        }
+
+        .invoice-pin-box .invoice-input:focus,
+        .invoice-pin-box .vat-lookup-row input:focus {
+            border-color: #7184b6;
+            box-shadow: 0 0 0 3px rgba(31,42,68,.08);
+        }
+
+    .invoice-pin-box .vat-lookup-row {
+        display: flex;
+        align-items: stretch;
+        gap: 9px;
+    }
+
+        .invoice-pin-box .vat-lookup-row input {
+            flex: 1 1 auto;
+        }
+
+    .invoice-pin-box .vat-search-btn {
+        width: 46px;
+        min-width: 46px;
+        min-height: 44px;
+        padding: 0;
+        border: 1px solid #c6ceda;
+        border-radius: 10px;
+        background: #f5f7fb;
+        color: #1f2a44;
+        cursor: pointer;
+        font-size: 19px;
+        display: grid;
+        place-items: center;
+        transition: all .15s ease;
+    }
+
+        .invoice-pin-box .vat-search-btn:hover:not(:disabled) {
+            background: #eef3ff;
+            border-color: #8798ba;
+            transform: translateY(-1px);
+        }
+
+        .invoice-pin-box .vat-search-btn:disabled {
+            cursor: wait;
+            opacity: .65;
+        }
+
+    .invoice-pin-box .invoice-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 150px;
+        gap: 0 12px;
+    }
+
+    .invoice-pin-box .invoice-field-full {
+        grid-column: 1 / -1;
+    }
+
+    .invoice-pin-box .aade-status {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        margin-top: 12px;
+        padding: 11px 13px;
+        border-radius: 10px;
+        font-size: .83rem;
+        line-height: 1.45;
+    }
+
+        .invoice-pin-box .aade-status.loading {
+            background: #f5f7fb;
+            border: 1px solid #e0e4ec;
+            color: #60697a;
+        }
+
+        .invoice-pin-box .aade-status.error-status {
+            background: #fff5f3;
+            border: 1px solid #f0c8c0;
+            color: #9e3528;
+        }
+
+    .invoice-pin-box .aade-customer-info {
+        margin-top: 14px;
+        padding: 14px;
+        border: 1px solid #d7e2f5;
+        border-radius: 11px;
+        background: #f5f8ff;
+    }
+
+    .invoice-pin-box .aade-info-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 11px;
+        color: #315d92;
+        font-size: .81rem;
+        font-weight: 800;
+    }
+
+    .invoice-pin-box .aade-info-grid {
+        display: grid;
+        gap: 10px;
+    }
+
+        .invoice-pin-box .aade-info-grid > div span {
+            display: block;
+            margin-bottom: 2px;
+            color: #7a8492;
+            font-size: .68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+        }
+
+        .invoice-pin-box .aade-info-grid > div strong {
+            display: block;
+            color: #283244;
+            font-size: .84rem;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+
+    .invoice-pin-box .invoice-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        margin-top: 20px;
+    }
+
+    .invoice-pin-box .invoice-submit-btn {
+        width: 100%;
+        min-height: 46px;
+        padding: 10px 15px;
+        border: 0;
+        border-radius: 10px;
+        background: #1f2a44;
+        color: #fff;
+        font-size: .93rem;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(31,42,68,.17);
+        transition: all .15s ease;
+    }
+
+        .invoice-pin-box .invoice-submit-btn:hover {
+            background: #172137;
+            transform: translateY(-1px);
+        }
+
+    .invoice-pin-box .invoice-back-btn {
+        align-self: center;
+        margin-top: 1px;
+    }
+
+    @@media (max-width: 560px) {
+        .pin-box.invoice-pin-box {
+            width: calc(100vw - 20px);
+            padding: 20px;
+        }
+
+        .invoice-pin-box .invoice-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .send-btn.sending,
+    .send-btn:disabled.sending {
+        background: #a9a9a9 !important;
+        color: #ffffff !important;
+        cursor: not-allowed;
+        opacity: 1;
+    }
+
+        .send-btn.sending:hover,
+        .send-btn:disabled.sending:hover {
+            background: #a9a9a9 !important;
+            transform: none;
+        }
+
+    .table-order-page {
+        width: 100vw;
+        min-height: calc(100vh - 70px);
+        margin-left: calc(50% - 50vw);
+        padding: 18px;
+        box-sizing: border-box;
+        background: var(--order-page-bg, #f4f6f9);
+        position: relative;
+    }
+
+    .order-background-menu {
+        position: fixed;
+        z-index: 6000;
+        width: 280px;
+        background: #fff;
+        border: 1px solid #d8dde6;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 12px 35px rgba(0,0,0,.22);
+    }
+
+        .order-background-menu h4 {
+            margin: 0 0 12px;
+        }
+
+    .order-background-field {
+        margin: 10px 0;
+    }
+
+        .order-background-field label {
+            display: block;
+            font-size: .82rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .order-background-field input[type=color] {
+            width: 100%;
+            height: 44px;
+            border: 1px solid #ccd2dc;
+            border-radius: 9px;
+            padding: 3px;
+            cursor: pointer;
+        }
+
+    .order-background-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+        .order-background-actions button {
+            flex: 1;
+            min-height: 42px;
+            border: 0;
+            border-radius: 9px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+    .order-background-reset {
+        background: #eef1f5;
+        color: #263246;
+    }
+
+    .order-background-save {
+        background: #1f2a44;
+        color: #fff;
+    }
+
+
+    /* POS layout: categories left, products center, order right */
+    html, body {
+        overflow-x: hidden;
+    }
+
+    .table-order-page {
+        width: 100vw;
+        max-width: 100vw;
+        min-height: calc(100dvh - 52px);
+        margin-left: calc(50% - 50vw);
+        padding: 18px;
+        box-sizing: border-box;
+        overflow-x: hidden;
+    }
+
+    .order-layout {
+        display: grid !important;
+        grid-template-columns: minmax(190px, min(var(--category-panel-width, 190px), calc(100vw - 380px))) minmax(0, 1fr) 330px !important;
+        gap: 14px;
+        align-items: start;
+    }
+
+    .category-panel {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        background: rgba(255,255,255,.94);
+        border-radius: 12px;
+        padding: 10px;
+        box-sizing: border-box;
+        position: sticky;
+        top: 12px;
+        overflow: hidden;
+    }
+
+    .category-panel-title {
+        margin: 2px 6px 9px;
+        font-size: .82rem;
+        font-weight: 800;
+        color: #586174;
+        text-transform: uppercase;
+    }
+
+    .category-list {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .category-choice {
+        box-sizing: border-box;
+        max-width: 100%;
+        min-height: 48px;
+        padding: 10px 12px;
+        border: 1px solid #d7dce5;
+        border-radius: 9px;
+        background: #fff;
+        color: #202736;
+        font: inherit;
+        font-weight: 800;
+        text-align: left;
+        cursor: pointer;
+        transition: .15s ease;
+    }
+
+        .category-choice:hover {
+            border-color: #1f2a44;
+        }
+
+        .category-choice.active {
+            background: #1f2a44;
+            color: #fff;
+            border-color: #1f2a44;
+        }
+
+    .products-panel {
+        min-width: 0;
+    }
+
+    .products-panel-header {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,.94);
+        border-radius: 10px;
+        font-weight: 800;
+        color: #202736;
+    }
+
+    .products-panel .item-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+        gap: 10px;
+        margin: 0;
+    }
+
+    .products-panel .menu-item-btn {
+        min-height: 82px;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 12px 8px;
+    }
+
+    /* Extras open as a dedicated full-screen tab, using the same tiles as menu products. */
+    .extras-screen-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 14px;
+        background: #f2f4f8;
+        overflow: auto;
+        box-sizing: border-box;
+    }
+
+    .extras-screen-box {
+        width: 100%;
+        min-height: 100%;
+        max-height: none;
+        overflow: auto;
+        margin: 0;
+        padding: 18px;
+        border-radius: 12px;
+        background: #f2f4f8;
+        color: #202736;
+        box-sizing: border-box;
+        text-align: left;
+    }
+
+    .extras-screen-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 14px;
+        padding: 4px 0 14px;
+        border-bottom: 1px solid #d5dbe5;
+    }
+
+    .extras-screen-header h3 {
+        margin: 0;
+        font-size: 1.35rem;
+        color: #202736;
+    }
+
+    .extras-screen-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+        gap: 10px;
+        margin: 14px 0;
+    }
+
+    .extras-screen-grid .menu-item-btn {
+        min-height: 82px;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 12px 8px;
+        background: #fff;
+        color: #202736;
+        border: 1px solid #d5dbe5;
+        border-radius: 10px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .extras-screen-grid .menu-item-btn.selected {
+        background: #1f2a44;
+        border-color: #1f2a44;
+        color: #fff;
+    }
+
+    .extras-screen-grid .menu-item-btn .price {
+        font-weight: 800;
+    }
+
+    .extras-screen-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid #d5dbe5;
+    }
+
+    .extra-option-btn {
+        min-height: 82px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 7px;
+        padding: 12px 8px;
+        border: 1px solid #d5dbe5;
+        border-radius: 10px;
+        background: #fff;
+        color: #202736;
+        font: inherit;
+        font-weight: 700;
+        text-align: center;
+        cursor: pointer;
+        transition: .15s ease;
+    }
+
+    .extra-option-btn:hover {
+        border-color: #1f2a44;
+    }
+
+    .extra-option-btn.selected {
+        background: #1f2a44;
+        border-color: #1f2a44;
+        color: #fff;
+    }
+
+    .extra-option-btn .price {
+        font-weight: 800;
+    }
+
+    .order-panel {
+        min-width: 0;
+        max-height: calc(100dvh - 110px);
+        overflow-y: auto;
+    }
+
+    @@media (max-width: 1050px) {
+        .order-layout {
+            grid-template-columns: minmax(165px, min(var(--category-panel-width, 165px), calc(100vw - 340px))) minmax(0, 1fr) 300px !important;
+        }
+    }
+
+    @@media (max-width: 820px) {
+        .order-layout {
+            grid-template-columns: 1fr !important;
+        }
+
+        .category-panel {
+            position: static;
+        }
+
+        .category-list {
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
+
+        .category-choice {
+            width: auto;
+            min-width: 130px;
+        }
+
+        .order-panel {
+            max-height: none;
+        }
+    }
+
+
+    .category-customization-menu {
+        position: fixed;
+        z-index: 10050;
+        width: 300px;
+        max-width: calc(100vw - 20px);
+        background: #fff;
+        border: 1px solid #d8dde7;
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0,0,0,.22);
+        padding: 14px;
+        color: #202736;
+    }
+
+        .category-customization-menu h4 {
+            margin: 0 0 12px;
+            font-size: 1rem;
+        }
+
+    .category-customization-field {
+        margin-bottom: 10px;
+    }
+
+        .category-customization-field label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: .75rem;
+            font-weight: 800;
+            color: #626b7a;
+        }
+
+        .category-customization-field input[type="color"] {
+            width: 100%;
+            height: 38px;
+            padding: 2px;
+        }
+
+        .category-customization-field input[type="number"] {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 34px;
+        }
+
+    .category-customization-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .category-customization-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+        .category-customization-actions button {
+            flex: 1;
+            min-height: 38px;
+            border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 800;
+        }
+
+    .category-customization-save {
+        background: #1f2a44;
+        color: #fff;
+    }
+
+    .category-customization-reset {
+        background: #eceef2;
+        color: #202736;
+    }
+
+    .category-customization-bold {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        font-size: .82rem;
+        font-weight: 700;
+    }
+
+    .action-button-customization-menu {
+        position: fixed;
+        z-index: 10060;
+        width: 310px;
+        max-width: calc(100vw - 20px);
+        background: #ffffff;
+        border: 1px solid #d8dde7;
+        border-radius: 14px;
+        box-shadow: 0 14px 38px rgba(31,42,68,.24);
+        padding: 15px;
+        color: #202736;
+    }
+
+    .action-button-customization-menu h4 {
+        margin: 0 0 5px;
+        font-size: 1rem;
+        color: #263b59;
+    }
+
+    .action-button-customization-caption {
+        margin: 0 0 14px;
+        color: #70798a;
+        font-size: .82rem;
+    }
+
+    .action-button-customization-menu input[type="color"] {
+        width: 100%;
+        height: 38px;
+        padding: 2px;
+        border: 1px solid #d5dce7;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+    }
+
+    .order-action-btn {
+        border-width: 1px !important;
+        font-weight: 700;
+        box-shadow: 0 2px 6px rgba(31,42,68,.07);
+        transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+    }
+
+    .order-action-btn:hover {
+        filter: brightness(.97);
+        transform: translateY(-1px);
+        box-shadow: 0 5px 12px rgba(31,42,68,.12);
+    }
+
+    .order-action-btn:active {
+        transform: translateY(0);
+    }
+
+    .action-button-color-hint {
+        margin: 10px 0 0;
+        font-size: .73rem;
+        line-height: 1.35;
+        color: #7b8492;
+        text-align: center;
+    }
+
+
+    /* Final mobile overrides: this style block is emitted with the page, after app.css. */
+    @@media (max-width: 680px) {
+        .table-order-page {
+            width: 100%;
+            max-width: 100%;
+            margin-left: 0;
+            padding: 10px !important;
+            overflow-x: clip;
+        }
+
+        .order-layout {
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 10px;
+        }
+
+        .category-panel {
+            position: static;
+            padding: 9px;
+        }
+
+        .category-list {
+            flex-direction: row;
+            flex-wrap: nowrap;
+            gap: 7px;
+            overflow-x: auto;
+            padding: 1px 1px 7px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .category-choice {
+            flex: 0 0 auto;
+            min-width: max-content;
+            max-width: 78vw;
+            min-height: 46px;
+            text-align: center;
+        }
+
+        .order-panel {
+            position: static !important;
+            max-height: none !important;
+            overflow: visible !important;
+            margin-bottom: max(16px, env(safe-area-inset-bottom));
+        }
+
+        .products-panel .item-grid,
+        .extras-screen-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .products-panel .menu-item-btn,
+        .extras-screen-grid .menu-item-btn {
+            min-height: 76px;
+            padding: 12px 8px;
+            overflow-wrap: anywhere;
+        }
+
+        .order-panel .send-btn,
+        .order-panel .close-btn,
+        .order-panel .order-action-btn {
+            min-height: 48px;
+        }
+
+        .pin-overlay {
+            align-items: flex-start;
+            overflow-y: auto;
+            padding: max(12px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+        }
+
+        .pin-box {
+            width: 100%;
+            max-width: 520px;
+            max-height: none;
+            margin: auto;
+            padding: 20px 16px;
+            box-sizing: border-box;
+        }
+
+        .extras-screen-overlay {
+            padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+        }
+
+        .extras-screen-box {
+            padding: 12px;
+        }
+    }
+
+</style>
+
+<div class="table-order-page" style="--order-page-bg:@pageBackground" @onclick="CloseCustomizationMenus" @oncontextmenu="OpenOrderBackgroundMenu" @oncontextmenu:preventDefault="true">
+
+    @if (showOrderBackgroundMenu)
+    {
+        <div class="order-background-menu" style="left:@(orderBackgroundMenuX)px; top:@(orderBackgroundMenuY)px" @onclick:stopPropagation="true">
+            <h4>🎨 Φόντο τραπεζιού</h4>
+            <div class="order-background-field">
+                <label>Χρώμα φόντου</label>
+                <input type="color" @bind="editingPageBackground" />
+            </div>
+            <div class="order-background-actions">
+                <button class="order-background-reset" @onclick="ResetOrderBackground">Επαναφορά στο φόντο τραπεζιών</button>
+                <button class="order-background-save" @onclick="SaveOrderBackground">Αποθήκευση</button>
+            </div>
+        </div>
+    }
+
+    @if (showCategoryCustomizationMenu)
+    {
+        <div class="category-customization-menu"
+             style="left:@(categoryCustomizationX)px; top:@(categoryCustomizationY)px"
+             @onclick:stopPropagation="true">
+            <h4>🎨 Μορφοποίηση κατηγορίας</h4>
+
+            <div class="category-customization-field">
+                <label>Γέμισμα</label>
+                <input type="color" @bind="editingCategoryStyle.Background" />
+            </div>
+
+            <div class="category-customization-row">
+                <div class="category-customization-field">
+                    <label>Χρώμα κειμένου</label>
+                    <input type="color" @bind="editingCategoryStyle.TextColor" />
+                </div>
+                <div class="category-customization-field">
+                    <label>Χρώμα περιγράμματος</label>
+                    <input type="color" @bind="editingCategoryStyle.BorderColor" />
+                </div>
+            </div>
+
+            <div class="category-customization-row">
+                <div class="category-customization-field">
+                    <label>Πλάτος (px)</label>
+                    <input type="number" min="80" max="500" @bind="editingCategoryStyle.Width" />
+                </div>
+                <div class="category-customization-field">
+                    <label>Ύψος (px)</label>
+                    <input type="number" min="32" max="180" @bind="editingCategoryStyle.Height" />
+                </div>
+            </div>
+
+            <div class="category-customization-field">
+                <label>Μέγεθος γραμματοσειράς (px)</label>
+                <input type="number" min="10" max="40" @bind="editingCategoryStyle.FontSize" />
+            </div>
+
+            <label class="category-customization-bold">
+                <input type="checkbox" @bind="editingCategoryStyle.Bold" />
+                Έντονα γράμματα
+            </label>
+
+            <div class="category-customization-actions">
+                <button class="category-customization-reset" @onclick="ResetCategoryCustomization">Επαναφορά</button>
+                <button class="category-customization-save" @onclick="SaveCategoryCustomization">Αποθήκευση</button>
+            </div>
+        </div>
+    }
+
+    @if (showActionButtonCustomizationMenu)
+    {
+        <div class="action-button-customization-menu"
+             style="left:@(actionCustomizationX)px; top:@(actionCustomizationY)px"
+             @onclick:stopPropagation="true">
+            <h4>🎨 Χρώματα κουμπιού</h4>
+            <p class="action-button-customization-caption">@GetActionButtonDisplayName(editingActionButtonKey)</p>
+
+            <div class="category-customization-field">
+                <label>Χρώμα φόντου</label>
+                <input type="color" @bind="editingActionButtonStyle.Background" />
+            </div>
+            <div class="category-customization-field">
+                <label>Χρώμα κειμένου</label>
+                <input type="color" @bind="editingActionButtonStyle.TextColor" />
+            </div>
+            <div class="category-customization-field">
+                <label>Χρώμα περιγράμματος</label>
+                <input type="color" @bind="editingActionButtonStyle.BorderColor" />
+            </div>
+
+            <div class="category-customization-actions">
+                <button class="category-customization-reset" @onclick="ResetActionButtonCustomization">Προεπιλογή</button>
+                <button class="category-customization-save" @onclick="SaveActionButtonCustomization">Αποθήκευση</button>
+            </div>
+        </div>
+    }
+
+    <button type="button" class="nav-button" @onclick='() => Nav.NavigateTo("/waiter", forceLoad: true)'>&larr; Πίσω στα τραπέζια</button>
+    <h2>@tableName</h2>
+
+    <div class="order-layout">
+        <div class="category-panel">
+            <div class="category-panel-title">Κατηγορίες</div>
+            <div class="category-list">
+                @if (categories.Count == 0)
+                {
+                    <span class="hint">Δεν υπάρχουν ενεργές κατηγορίες. Ενεργοποίησε μία από τη Διαχείριση → Κατηγορίες.</span>
+                }
+                @foreach (var cat in categories)
+                {
+                    <button class="category-choice @(selectedCategoryId == cat.Id ? "active" : "")"
+                            style="@GetCategoryStyle(cat.Id)"
+                            @onclick="() => SelectCategory(cat.Id)"
+                            @oncontextmenu="(e) => OpenCategoryCustomization(cat.Id, e)"
+                            @oncontextmenu:preventDefault="true"
+                            @oncontextmenu:stopPropagation="true">
+                        @cat.Name
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="products-panel">
+            @if (selectedCategoryId != 0 && itemsByCategory.TryGetValue(selectedCategoryId, out var selectedCategoryItems))
+            {
+                var selectedCategory = categories.FirstOrDefault(c => c.Id == selectedCategoryId);
+                <div class="products-panel-header">@(selectedCategory?.Name ?? "Προϊόντα")</div>
+                <div class="item-grid">
+                    @foreach (var item in selectedCategoryItems)
+                    {
+                        <button class="menu-item-btn"
+                                @onclick="() => SelectItem(item)">
+                            <span>@item.Name</span>
+                            <span class="price">€@item.Price.ToString("0.00")</span>
+                        </button>
+                    }
+                    @if (selectedCategoryItems.Count == 0)
+                    {
+                        <span class="hint">Δεν έχουν προστεθεί είδη σε αυτή την κατηγορία.</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="products-panel-header">Επίλεξε κατηγορία</div>
+            }
+        </div>
+
+        <div class="order-panel">
+            <h3>Παραγγελία</h3>
+            <ul class="order-list">
+                @foreach (var oi in order.Items.Where(i => !i.IsCancelled && RemainingQuantityForItem(i) > 0).OrderBy(i => i.Id))
+                {
+                    <li class="order-item-interactive @(oi.IsPrinted ? "printed" : "pending")"
+                        @onpointerdown="(e) => OrderItemPointerDown(oi, e)"
+                        @onpointerup="(e) => OrderItemPointerUp(oi, e)"
+                        @onclick="() => HandleOrderItemTap(oi)">
+                        <span>
+                            @RemainingQuantityForItem(oi) x @oi.MenuItem!.Name
+                            @if (oi.ExtrasPrice > 0)
+
+
+
+
+
+
+
+                            {
+                                <text> (+€@oi.ExtrasPrice.ToString("0.00"))</text>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(oi.Notes))
+
+
+
+
+
+
+
+                            {
+                                <br />
+
+                                <small>@oi.Notes</small>
+                            }
+                        </span>
+                        <button class="remove-btn"
+                                title="Αφαίρεση είδους"
+                                @onclick="() => RemoveItemFromPendingOrder(oi)"
+                                @onclick:stopPropagation="true">
+                            ✕
+                        </button>
+                        @if (oi.IsPrinted)
+                        {
+                            <span class="sent-tag">απεστάλη</span>
+                        }
+                    </li>
+                }
+            </ul>
+
+            <p class="total"><strong>Σύνολο: €@CurrentOrderTotal.ToString("0.00")</strong></p>
+
+            <button class="send-btn @(sendingToKitchen ? "sending" : "")"
+                    disabled="@(sendingToKitchen || !order.Items.Any(i => !i.IsPrinted && !i.IsCancelled))"
+                    @onclick="SendToKitchen">
+                @(sendingToKitchen ? "Αποστολή..." : "Αποστολή στην κουζίνα/μπαρ")
+            </button>
+
+            <button class="close-btn order-action-btn" style='@GetActionButtonStyle("reprint")'
+                    title="Δεξί κλικ για αλλαγή χρώματος"
+                    @oncontextmenu='(e) => OpenActionButtonCustomization("reprint", e)'
+                    @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true"
+                    @onclick="ReprintOrder">Επανεκτύπωση παραγγελίας</button>
+            <button class="close-btn order-action-btn" style='@GetActionButtonStyle("bill")'
+                    title="Δεξί κλικ για αλλαγή χρώματος"
+                    @oncontextmenu='(e) => OpenActionButtonCustomization("bill", e)'
+                    @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true"
+                    @onclick="PrintBill">Λογαριασμός</button>
+            <button class="close-btn order-action-btn" style='@GetActionButtonStyle("cancel")'
+                    title="Δεξί κλικ για αλλαγή χρώματος"
+                    @oncontextmenu='(e) => OpenActionButtonCustomization("cancel", e)'
+                    @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true"
+                    @onclick="BeginCancelWholeOrder">Ακύρωση παραγγελίας</button>
+            <button class="close-btn order-action-btn" style='@GetActionButtonStyle("close")'
+                    title="Δεξί κλικ για αλλαγή χρώματος"
+                    @oncontextmenu='(e) => OpenActionButtonCustomization("close", e)'
+                    @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true"
+                    @onclick="() => { showPaymentModal = true; closeStep = 1; }">Κλείσιμο τραπεζιού</button>
+            <p class="action-button-color-hint">🎨 Δεξί κλικ σε ένα από τα παραπάνω κουμπιά για να αλλάξεις τα χρώματά του.</p>
+
+            @if (showPaymentModal)
+
+
+
+
+
+
+
+            {
+                <div class="pin-overlay">
+                    <div class="pin-box @(closeStep == 3 ? "invoice-pin-box" : "")">
+                        @if (closeStep == 1)
+                        {
+                            <h3>Τρόπος πληρωμής</h3>
+                            <p class="hint">Τραπέζι: @tableName</p>
+                            <div class="payment-choice">
+                                <button class="pay-btn cash" @onclick="() => SelectPayment(PaymentMethod.Cash)">💵 Μετρητά — όλο το τραπέζι</button>
+                                <button class="pay-btn card" @onclick="() => SelectPayment(PaymentMethod.Card)">💳 Κάρτα — όλο το τραπέζι</button>
+                            </div>
+                            <button class="close-btn" @onclick="BeginSplitPayment">➗ Μερική / Split πληρωμή</button>
+                            <button class="linkbtn-plain" @onclick="() => showPaymentModal = false">Άκυρο</button>
+                        }
+                        else if (closeStep == 2)
+                        {
+                            <h3>Παραστατικό</h3>
+                            @if (cardFiscalRetryOnly)
+                            {
+                                <p class="error">Η συναλλαγή κάρτας έχει ήδη εγκριθεί. Δεν θα σταλεί ξανά ποσό στο POS.</p>
+                                @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                                @if (!cardFiscalRetryRequiresRecovery)
+                                {
+                                    <button class="pay-btn card" @onclick="RetryApprovedCardFiscalDocument">🧾 Επανάληψη έκδοσης @((pendingCardDocumentKind == FiscalDocumentKind.Invoice) ? "τιμολογίου" : "απόδειξης")</button>
+                                }
+                            }
+                            @if (!cardFiscalRetryOnly)
+                            {
+                            @if (selectedPaymentMethod == PaymentMethod.Card && cardPosSettings.Count > 0)
+                            {
+                                <label>Τερματικό κάρτας</label>
+                                <select class="form-select" @bind="selectedCardPosSettingsId" @bind:after="CardPosChanged">
+                                    @foreach (var pos in cardPosSettings)
+                                    {
+                                        <option value="@pos.Id">@pos.Name — @pos.Provider — TID @pos.TerminalId — @(pos.UseProduction ? "Παραγωγικό" : "Demo")</option>
+                                    }
+                                </select>
+                            }
+                            @if (!string.IsNullOrEmpty(fiscalError))
+
+
+
+
+
+
+
+                            {
+                                <p class="error">@fiscalError</p>
+                            }
+                            <div class="payment-choice">
+                                <button class="pay-btn cash" @onclick="() => SelectDocumentKind(FiscalDocumentKind.Receipt)">🧾 Απόδειξη</button>
+                                <button class="pay-btn card" @onclick="() => SelectDocumentKind(FiscalDocumentKind.Invoice)">📄 Τιμολόγιο</button>
+                            </div>
+                            }
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 1">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 3)
+                        {
+                            <div class="invoice-form">
+                                <div class="invoice-form-header">
+                                    <div class="invoice-form-icon">📄</div>
+                                    <div>
+                                        <h3>Στοιχεία Τιμολόγησης</h3>
+                                        <p>Αναζήτησε τον πελάτη με το ΑΦΜ του και τα στοιχεία θα συμπληρωθούν αυτόματα.</p>
+                                    </div>
+                                </div>
+
+                                <div class="invoice-field">
+                                    <label for="counterpart-vat">ΑΦΜ πελάτη <span>*</span></label>
+                                    <div class="vat-lookup-row">
+                                        <input id="counterpart-vat"
+                                               class="invoice-input"
+                                               value="@counterpartVat"
+                                               @oninput="OnCounterpartVatInput"
+                                               maxlength="9"
+                                               inputmode="numeric"
+                                               autocomplete="off"
+                                               placeholder="9 ψηφία" />
+
+                                        @if (NormalizedCounterpartVat.Length == 9)
+
+
+
+
+
+
+
+                                        {
+                                            <button type="button"
+                                                    class="vat-search-btn"
+                                                    title="Αναζήτηση στοιχείων ΑΑΔΕ"
+                                                    disabled="@aadeLookupInProgress"
+                                                    @onclick="LookupCustomerByVatAsync">
+                                                @(aadeLookupInProgress ? "⏳" : "🔎")
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="invoice-grid">
+                                    <div class="invoice-field invoice-field-full">
+                                        <label for="counterpart-name">Επωνυμία <span>*</span></label>
+                                        <input id="counterpart-name" class="invoice-input" @bind="counterpartName" placeholder="Επωνυμία επιχείρησης" />
+                                    </div>
+
+                                    <div class="invoice-field invoice-field-full">
+                                        <label for="counterpart-street">Διεύθυνση</label>
+                                        <input id="counterpart-street" class="invoice-input" @bind="counterpartStreet" placeholder="Οδός και αριθμός" />
+                                    </div>
+
+                                    <div class="invoice-field">
+                                        <label for="counterpart-city">Πόλη</label>
+                                        <input id="counterpart-city" class="invoice-input" @bind="counterpartCity" placeholder="Πόλη" />
+                                    </div>
+
+                                    <div class="invoice-field">
+                                        <label for="counterpart-postal">Τ.Κ.</label>
+                                        <input id="counterpart-postal" class="invoice-input" @bind="counterpartPostalCode" placeholder="Τ.Κ." inputmode="numeric" />
+                                    </div>
+                                </div>
+
+                                @if (aadeLookupInProgress)
+                                {
+                                    <div class="aade-status loading">
+                                        <span>⏳</span> Γίνεται αναζήτηση στοιχείων στην ΑΑΔΕ...
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrEmpty(aadeLookupError))
+                                {
+                                    <div class="aade-status error-status">
+                                        <span>⚠</span> @aadeLookupError
+                                    </div>
+                                }
+
+                                @if (aadeCustomerFound)
+                                {
+                                    <div class="aade-customer-info">
+                                        <div class="aade-info-title"><span>✓</span> Στοιχεία ανακτήθηκαν από ΑΑΔΕ</div>
+                                        <div class="aade-info-grid">
+                                            @if (!string.IsNullOrWhiteSpace(counterpartDoy))
+
+
+
+
+
+
+
+                                            {
+                                                <div><span>ΔΟΥ</span><strong>@counterpartDoy</strong></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(counterpartMainActivity))
+
+
+
+
+
+
+
+                                            {
+                                                <div><span>Κύρια δραστηριότητα</span><strong>@counterpartMainActivity</strong></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(counterpartLegalStatus))
+
+
+
+
+
+
+
+                                            {
+                                                <div><span>Νομική μορφή</span><strong>@counterpartLegalStatus</strong></div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrEmpty(fiscalError))
+                                {
+                                    <div class="aade-status error-status">
+                                        <span>⚠</span> @fiscalError
+                                    </div>
+                                }
+
+                                <div class="invoice-actions">
+                                    <button class="invoice-submit-btn" @onclick="ConfirmClose">
+                                        <span>✓</span> Έκδοση Τιμολογίου & Κλείσιμο
+                                    </button>
+                                    <button class="linkbtn-plain invoice-back-btn" @onclick="() => closeStep = 2">&larr; Πίσω</button>
+                                </div>
+                            </div>
+                        }
+                        else if (closeStep == 4)
+                        {
+                            <h3>Έκδοση παραστατικού...</h3>
+                            <p class="hint">Στέλνεται στην ΑΑΔΕ μέσω Parochos, περίμενε λίγο.</p>
+                            @if (!string.IsNullOrEmpty(fiscalError))
+
+
+
+
+
+
+
+                            {
+                                <p class="error">@fiscalError</p>
+                                <button @onclick="() => closeStep = 2">&larr; Πίσω</button>
+                                <button class="linkbtn-plain" @onclick="() => showPaymentModal = false">Άκυρο</button>
+                            }
+                        }
+                        else if (closeStep == 7)
+                        {
+                            <h3>➗ Split πληρωμή</h3>
+                            <p class="hint">Επίλεξε πόσα τεμάχια θα πληρωθούν τώρα.</p>
+                            @foreach (var item in splitPaymentItems)
+
+                            {
+
+                                var selectedQty = splitQuantities.TryGetValue(item.Id, out var q) ? q : 0;
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee;">
+                                    <span>@item.MenuItem?.Name <small>(διαθέσιμα: @item.Quantity)</small></span>
+                                    <input type="number" min="0" max="@item.Quantity" value="@selectedQty" style="width:80px;" @onchange="e => SetSplitQuantity(item.Id, e.Value?.ToString())" />
+                                </div>
+                            }
+                            <p><strong>Πληρωμή τώρα: €@SplitSelectedTotal.ToString("0.00")</strong></p>
+                            @if (!string.IsNullOrEmpty(fiscalError))
+                            {
+                                <p class="error">@fiscalError</p>
+                            }
+                            <button @onclick="ContinueSplitPayment">Συνέχεια</button>
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 1">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 8)
+                        {
+                            <h3>Τρόπος πληρωμής</h3>
+                            <p class="hint">Ποσό: €@SplitSelectedTotal.ToString("0.00")</p>
+                            <div class="payment-choice">
+                                <button class="pay-btn cash" @onclick="() => SelectSplitPayment(PaymentMethod.Cash)">💵 Μετρητά</button>
+                                <button class="pay-btn card" @onclick="() => SelectSplitPayment(PaymentMethod.Card)">💳 Κάρτα</button>
+                            </div>
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 7">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 9)
+                        {
+                            <h3>Παραστατικό</h3>
+                            @if (selectedPaymentMethod == PaymentMethod.Card && cardPosSettings.Count > 0)
+                            {
+                                <label>Τερματικό κάρτας</label>
+                                <select class="form-select" @bind="selectedCardPosSettingsId" @bind:after="CardPosChanged">
+                                    @foreach (var pos in cardPosSettings)
+                                    {
+                                        <option value="@pos.Id">@pos.Name — @pos.Provider — TID @pos.TerminalId — @(pos.UseProduction ? "Παραγωγικό" : "Demo")</option>
+                                    }
+                                </select>
+                            }
+                            @if (!string.IsNullOrEmpty(fiscalError))
+                            {
+                                <p class="error">@fiscalError</p>
+                            }
+                            <div class="payment-choice">
+                                <button class="pay-btn cash" @onclick="() => IssueSelectedPayment(FiscalDocumentKind.Receipt)">🧾 Απόδειξη</button>
+                                <button class="pay-btn card" @onclick="() => IssueSelectedPayment(FiscalDocumentKind.Invoice)">📄 Τιμολόγιο</button>
+                            </div>
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 8">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 10)
+                        {
+                            @if (IsSelectedVivaCloud)
+                            {
+                                <h3>💳 Πληρωμή μέσω Viva Cloud Terminal</h3>
+                                <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                                <p class="hint">POS: @SelectedCardPosSetting?.Name — Terminal ID @SelectedCardPosSetting?.TerminalId</p>
+                                <button @onclick="() => StartSelectedVivaPayment(true)" disabled="@epayBusy">@(epayBusy ? "Αναμονή αποτελέσματος Viva…" : !string.IsNullOrWhiteSpace(cardTransactionId) ? "🧾 Επανάληψη έκδοσης παραστατικού" : "💳 Αποστολή ποσού στο Viva POS")</button>
+                                @if (vivaStatusCheckRequired) { <p class="error">Η προηγούμενη προσπάθεια έχει αβέβαιο αποτέλεσμα. Έλεγξε το ιστορικό Viva πριν από νέα προσπάθεια.</p><p class="hint">Session ID: @vivaPendingSessionId</p> }
+                                @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                            }
+                            else if (IsSelectedEdpsWebEcr)
+                            {
+                                <h3>💳 Πληρωμή μέσω EDPS Middleware</h3>
+                                <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                                <p class="hint">POS: @SelectedCardPosSetting?.Name — φυσικό TID @SelectedCardPosSetting?.TerminalId — Middleware route: @(string.IsNullOrWhiteSpace(SelectedCardPosSetting?.IdUrl) ? "/terminal/txninit" : SelectedCardPosSetting?.IdUrl)</p>
+                                <button @onclick="StartEdpsSplitCardPayment" disabled="@epayBusy">@(epayBusy ? "Προετοιμασία / αναμονή EDPS…" : edpsRetryWithFreshProviderData ? "🔄 Νέα προσπάθεια (νέα υπογραφή)" : "💳 Αποστολή ποσού στο EDPS POS")</button>
+                                @if (edpsStatusCheckRequired)
+                                {
+                                    <p class="error">Έλεγξε στο POS αν η προηγούμενη προσπάθεια χρεώθηκε. Αν επιβεβαιώσεις ότι απορρίφθηκε, πάτησε ξανά το ίδιο κουμπί για αυτόματη νέα υπογραφή και επανάληψη.</p>
+                                }
+                            }
+                            else
+                            {
+                            <h3>💳 Πληρωμή με WebECR — @(SelectedCardPosSetting?.Provider ?? "ePay")</h3>
+                            <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                            @if (IsSelectedMellonWebEcr)
+                            {
+                                <p>POS: @SelectedCardPosSetting?.Name — @SelectedCardPosSetting?.Provider — TID @SelectedCardPosSetting?.TerminalId — @(SelectedCardPosSetting?.UseProduction == true ? "Παραγωγικό" : "Demo")</p>
+                                <button @onclick="StartEpaySplitCardPayment" disabled="@epayBusy">@(epayBusy ? "Αναμονή απάντησης POS…" : !string.IsNullOrWhiteSpace(cardTransactionId) ? "🧾 Επανάληψη έκδοσης παραστατικού" : "💳 Αποστολή ποσού στο επιλεγμένο POS")</button>
+                            }
+                            else
+                            {
+                            <button @onclick="() => LoadEpayTerminals(true)" disabled="@epayBusy">@(epayBusy ? "Αναζήτηση διαθέσιμων POS…" : "🔄 Αναζήτηση διαθέσιμων POS")</button>
+                            @if (epayTerminals.Count > 0)
+                            {
+                                <label>Επίλεξε POS</label>
+                                <select class="form-select" @bind="selectedEpayBackendId">
+                                    <option value="">-- Επιλογή POS --</option>
+                                    @foreach (var t in epayTerminals)
+                                    {
+                                        <option value="@t.BackendId">TID @t.TerminalId — ID URL @t.BackendId — @t.Merchant @(!string.IsNullOrWhiteSpace(t.Acquirer) ? $"({t.Acquirer})" : "")</option>
+                                    }
+                                </select>
+                                <button @onclick="StartEpaySplitCardPayment" disabled="@(epayBusy || string.IsNullOrWhiteSpace(selectedEpayBackendId))">@(epayBusy ? "Αναμονή απάντησης ePay…" : "💳 Αποστολή ποσού στο επιλεγμένο POS")</button>
+                            }
+                            }
+                            @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                            }
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 8">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 6)
+                        {
+                            @if (IsSelectedVivaCloud)
+                            {
+                                <h3>💳 Πληρωμή μέσω Viva Cloud Terminal</h3>
+                                <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                                <p class="hint">POS: @SelectedCardPosSetting?.Name — Terminal ID @SelectedCardPosSetting?.TerminalId</p>
+                                <button @onclick="() => StartSelectedVivaPayment(false)" disabled="@epayBusy">@(epayBusy ? "Αναμονή αποτελέσματος Viva…" : !string.IsNullOrWhiteSpace(cardTransactionId) ? "🧾 Επανάληψη έκδοσης παραστατικού" : "💳 Αποστολή ποσού στο Viva POS")</button>
+                                @if (vivaStatusCheckRequired) { <p class="error">Η προηγούμενη προσπάθεια έχει αβέβαιο αποτέλεσμα. Έλεγξε το ιστορικό Viva πριν από νέα προσπάθεια.</p><p class="hint">Session ID: @vivaPendingSessionId</p> }
+                                @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                            }
+                            else if (IsSelectedEdpsWebEcr)
+                            {
+                                <h3>💳 Πληρωμή μέσω EDPS Middleware</h3>
+                                <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                                <p class="hint">POS: @SelectedCardPosSetting?.Name — φυσικό TID @SelectedCardPosSetting?.TerminalId — Middleware route: @(string.IsNullOrWhiteSpace(SelectedCardPosSetting?.IdUrl) ? "/terminal/txninit" : SelectedCardPosSetting?.IdUrl)</p>
+                                <button @onclick="StartEdpsFullCardPayment" disabled="@epayBusy">@(epayBusy ? "Προετοιμασία / αναμονή EDPS…" : edpsRetryWithFreshProviderData ? "🔄 Νέα προσπάθεια (νέα υπογραφή)" : "💳 Αποστολή ποσού στο EDPS POS")</button>
+                                @if (edpsStatusCheckRequired)
+                                {
+                                    <p class="error">Έλεγξε στο POS αν η προηγούμενη προσπάθεια χρεώθηκε. Αν επιβεβαιώσεις ότι απορρίφθηκε, πάτησε ξανά το ίδιο κουμπί για αυτόματη νέα υπογραφή και επανάληψη.</p>
+                                }
+                                @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                            }
+                            else
+                            {
+                            <h3>💳 Πληρωμή με WebECR — @(SelectedCardPosSetting?.Provider ?? "ePay")</h3>
+                            <p><strong>Ποσό:</strong> €@pendingCardAmount.ToString("0.00")</p>
+                            @if (IsSelectedMellonWebEcr)
+                            {
+                                <p>POS: @SelectedCardPosSetting?.Name — @SelectedCardPosSetting?.Provider — TID @SelectedCardPosSetting?.TerminalId — @(SelectedCardPosSetting?.UseProduction == true ? "Παραγωγικό" : "Demo")</p>
+                                <button @onclick="StartEpayFullCardPayment" disabled="@epayBusy">@(epayBusy ? "Αναμονή απάντησης POS…" : !string.IsNullOrWhiteSpace(cardTransactionId) ? "🧾 Επανάληψη έκδοσης παραστατικού" : "💳 Αποστολή ποσού στο επιλεγμένο POS")</button>
+                            }
+                            else
+                            {
+                            <button @onclick="() => LoadEpayTerminals(false)" disabled="@epayBusy">@(epayBusy ? "Αναζήτηση διαθέσιμων POS…" : "🔄 Αναζήτηση διαθέσιμων POS")</button>
+                            @if (epayTerminals.Count > 0)
+                            {
+                                <label>Επίλεξε POS</label>
+                                <select class="form-select" @bind="selectedEpayBackendId">
+                                    <option value="">-- Επιλογή POS --</option>
+                                    @foreach (var t in epayTerminals)
+                                    {
+                                        <option value="@t.BackendId">TID @t.TerminalId — ID URL @t.BackendId — @t.Merchant @(!string.IsNullOrWhiteSpace(t.Acquirer) ? $"({t.Acquirer})" : "")</option>
+                                    }
+                                </select>
+                                <button @onclick="StartEpayFullCardPayment" disabled="@(epayBusy || string.IsNullOrWhiteSpace(selectedEpayBackendId))">@(epayBusy ? "Αναμονή απάντησης ePay…" : "💳 Αποστολή ποσού στο επιλεγμένο POS")</button>
+                            }
+                            }
+                            @if (!string.IsNullOrEmpty(fiscalError)) { <p class="error">@fiscalError</p> }
+                            }
+                            <button class="linkbtn-plain" @onclick="() => closeStep = 2">&larr; Πίσω</button>
+                        }
+                        else if (closeStep == 5)
+                        {
+                            <h3>✅ @lastDocumentLabel εκδόθηκε</h3>
+                            <p class="hint">Αρ. @lastSeriesAndNumber @(lastMark is not null ? $"— ΜΑΡΚ: {lastMark}" : "")</p>
+                            @if (!string.IsNullOrEmpty(lastPdfUrl))
+
+
+
+
+
+
+
+                            {
+                                <a class="export-btn" href="@lastPdfUrl" target="_blank">📄 Άνοιγμα / Λήψη PDF</a>
+                            }
+
+
+
+
+
+
+
+                            else
+
+
+
+
+
+
+
+                            {
+                                <p class="hint">Το PDF δεν είναι ακόμα διαθέσιμο (ο Parochos μπορεί να χρειάζεται λίγο χρόνο ακόμα).</p>
+                            }
+                            <button @onclick="FinishClosing">Συνέχεια</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (showCancelModal && pendingCancellationItem is not null)
+
+
+
+            {
+                <div class="pin-overlay">
+                    <div class="pin-box">
+                        <h3>⚠ Ακύρωση είδους</h3>
+                        <p><strong>@pendingCancellationItem.Quantity x @pendingCancellationItem.MenuItem?.Name</strong></p>
+
+                        @if (pendingCancellationItem.IsPrinted)
+                        {
+                            <p class="hint">Το είδος έχει ήδη σταλεί ως φορολογικό Δελτίο Παραγγελίας. Ο Parochos ακυρώνει τα ανοιχτά Order Tickets του τραπεζιού και στη συνέχεια το σύστημα επανεκδίδει φορολογικά το ενεργό υπόλοιπο.</p>
+                        }
+                        else
+                        {
+                            <p class="hint">Το είδος δεν έχει σταλεί ακόμα στην ΑΑΔΕ και θα αφαιρεθεί μόνο από την τρέχουσα παραγγελία.</p>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(cancellationError))
+                        {
+                            <p class="error">@cancellationError</p>
+                        }
+
+                        <div class="payment-choice">
+                            <button class="pay-btn cash" disabled="@cancellationInProgress" @onclick="ConfirmCancelItem">✓ Ακύρωση</button>
+                            <button class="linkbtn-plain" disabled="@cancellationInProgress" @onclick="CloseCancelModal">Πίσω</button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (showWholeOrderCancelModal)
+
+
+
+            {
+                <div class="pin-overlay">
+                    <div class="pin-box">
+                        <h3>⚠ Ακύρωση παραγγελίας</h3>
+                        <p>
+                            Θα ακυρωθούν <strong>όλα τα ενεργά είδη</strong> της παραγγελίας
+                            και το τραπέζι θα κλείσει.
+                        </p>
+
+                        @if (!string.IsNullOrWhiteSpace(wholeOrderCancellationError))
+                        {
+                            <p class="error">@wholeOrderCancellationError</p>
+                        }
+
+                        <div class="payment-choice">
+                            <button class="pay-btn cash"
+                                    disabled="@wholeOrderCancellationInProgress"
+                                    @onclick="ConfirmCancelWholeOrder">
+                                @(wholeOrderCancellationInProgress ? "⏳ Ακύρωση..." : "✓ Ναι, ακύρωση")
+                            </button>
+                            <button class="linkbtn-plain"
+                                    disabled="@wholeOrderCancellationInProgress"
+                                    @onclick="CloseWholeOrderCancelModal">
+                                Πίσω
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (showExtraPanel && pendingItem is not null)
+            {
+                <div class="extras-screen-overlay">
+                    <section class="extras-screen-box" role="dialog" aria-modal="true" aria-label="Επιλογή extra">
+                        <div class="extras-screen-header">
+                            <div>
+                                <h3>Extra για: @pendingItem.Name</h3>
+                                <p class="hint">Επίλεξε τα extra πατώντας τα κουτάκια, όπως επιλέγεις προϊόντα από τις κατηγορίες.</p>
+                            </div>
+                            <button class="linkbtn-plain" @onclick="CancelPending">← Πίσω στα προϊόντα</button>
+                        </div>
+
+                        <div class="extras-screen-grid">
+                            @foreach (var extra in ExtrasForCurrentItem())
+                            {
+                                <button type="button"
+                                        class="menu-item-btn @(pendingSelectedExtras.Contains(extra.Id) ? "selected" : "")"
+                                        @onclick="() => ToggleExtra(extra.Id)">
+                                    <span>@extra.Name</span>
+                                    <span class="price">@(extra.Price >= 0 ? "+" : "")€@extra.Price.ToString("0.00")</span>
+                                </button>
+                            }
+                        </div>
+
+                        @if (!ExtrasForCurrentItem().Any())
+                        {
+                            <p class="hint">Δεν υπάρχουν extra συνδεδεμένα με αυτό το προϊόν ή την κατηγορία του.</p>
+                        }
+
+                        <div class="extras-screen-footer">
+                            <strong>Σύνολο extra: €@ExtrasForCurrentItem().Where(e => pendingSelectedExtras.Contains(e.Id)).Sum(e => e.Price).ToString("0.00")</strong>
+                            <div class="payment-choice">
+                                <button class="pay-btn cash" @onclick="ConfirmAddItem">Προσθήκη στην παραγγελία</button>
+                                <button class="linkbtn-plain" @onclick="CancelPending">Ακύρωση</button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(statusMessage))
+
+
+
+
+
+
+
+            {
+                <p class="status">@statusMessage</p>
+            }
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private static List<PrinterStation> GetCategoryPrinters(MenuCategory? category)
+    {
+        if (category is null) return new List<PrinterStation>();
+
+        var stations = category.PrinterStations?.ToList() ?? new List<PrinterStation>();
+        if (category.PrinterStation is not null && stations.All(s => s.Id != category.PrinterStation.Id))
+            stations.Add(category.PrinterStation);
+
+        return stations.DistinctBy(s => s.Id).ToList();
+    }
+
+    private const string DefaultBackground = "#f4f6f9";
+    private const string TablesBackgroundKey = "restaurant.tables.background";
+    private const string OrderBackgroundKey = "restaurant.tableorder.background";
+
+    private string pageBackground = DefaultBackground;
+    private string editingPageBackground = DefaultBackground;
+    private bool showOrderBackgroundMenu;
+    private double orderBackgroundMenuX = 20;
+    private double orderBackgroundMenuY = 20;
+
+    private const string CategoryStylesKey = "restaurant.tableorder.category.styles";
+    private readonly Dictionary<int, CategoryStyle> categoryStyles = new();
+    private CategoryStyle editingCategoryStyle = new();
+    private int editingCategoryId;
+    private bool showCategoryCustomizationMenu;
+    private double categoryCustomizationX = 20;
+    private double categoryCustomizationY = 20;
+
+    private const string ActionButtonStylesKey = "restaurant.tableorder.actionbutton.styles";
+    private readonly Dictionary<string, ActionButtonStyle> actionButtonStyles = new(StringComparer.OrdinalIgnoreCase);
+    private ActionButtonStyle editingActionButtonStyle = new();
+    private string editingActionButtonKey = "reprint";
+    private bool showActionButtonCustomizationMenu;
+    private double actionCustomizationX = 20;
+    private double actionCustomizationY = 20;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        // If this table page has no personal override, inherit the background
+        // configured on the main table-selection page.
+        var overrideBackground = await JS.InvokeAsync<string?>("localStorage.getItem", OrderBackgroundKey);
+        var inheritedBackground = await JS.InvokeAsync<string?>("localStorage.getItem", TablesBackgroundKey);
+
+        pageBackground = !string.IsNullOrWhiteSpace(overrideBackground)
+            ? overrideBackground!
+            : (!string.IsNullOrWhiteSpace(inheritedBackground) ? inheritedBackground! : DefaultBackground);
+
+        editingPageBackground = pageBackground;
+
+        var savedCategoryStyles = await JS.InvokeAsync<string?>("localStorage.getItem", CategoryStylesKey);
+        if (!string.IsNullOrWhiteSpace(savedCategoryStyles))
+        {
+            try
+            {
+                var loaded = JsonSerializer.Deserialize<Dictionary<int, CategoryStyle>>(savedCategoryStyles);
+                if (loaded is not null)
+                {
+                    categoryStyles.Clear();
+                    foreach (var pair in loaded)
+                        categoryStyles[pair.Key] = pair.Value;
+                }
+            }
+            catch
+            {
+                categoryStyles.Clear();
+            }
+        }
+
+        var savedActionButtonStyles = await JS.InvokeAsync<string?>("localStorage.getItem", ActionButtonStylesKey);
+        if (!string.IsNullOrWhiteSpace(savedActionButtonStyles))
+        {
+            try
+            {
+                var loaded = JsonSerializer.Deserialize<Dictionary<string, ActionButtonStyle>>(savedActionButtonStyles);
+                if (loaded is not null)
+                {
+                    actionButtonStyles.Clear();
+                    foreach (var pair in loaded)
+                        actionButtonStyles[pair.Key] = pair.Value;
+                }
+            }
+            catch
+            {
+                actionButtonStyles.Clear();
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string GetCategoryStyle(int categoryId)
+    {
+        if (!categoryStyles.TryGetValue(categoryId, out var style))
+            return "";
+
+        var active = selectedCategoryId == categoryId;
+        var background = active ? style.Background : style.Background;
+        return $"background:{background};color:{style.TextColor};border-color:{style.BorderColor};width:min({style.Width}px, 100%);min-height:{style.Height}px;height:{style.Height}px;font-size:{style.FontSize}px;font-weight:{(style.Bold ? 800 : 400)};";
+    }
+
+    private int GetCategoryPanelWidth()
+    {
+        var widestCategory = categoryStyles.Count == 0
+            ? 100
+            : categoryStyles.Values.Max(s => s.Width);
+
+        // Keep enough room for the products and order columns. The actual CSS
+        // also clamps this value on smaller screens.
+        return Math.Max(190, widestCategory + 20);
+    }
+
+    private void OpenCategoryCustomization(int categoryId, MouseEventArgs e)
+    {
+        showOrderBackgroundMenu = false;
+        showCategoryCustomizationMenu = true;
+        editingCategoryId = categoryId;
+        editingCategoryStyle = categoryStyles.TryGetValue(categoryId, out var saved)
+            ? saved.Clone()
+            : new CategoryStyle();
+
+        categoryCustomizationX = Math.Min(e.ClientX, Math.Max(10, 320));
+        categoryCustomizationY = Math.Min(e.ClientY, Math.Max(10, 650));
+    }
+
+    private async Task SaveCategoryCustomization()
+    {
+        categoryStyles[editingCategoryId] = editingCategoryStyle.Clone();
+        showCategoryCustomizationMenu = false;
+        var json = JsonSerializer.Serialize(categoryStyles);
+        await JS.InvokeVoidAsync("localStorage.setItem", CategoryStylesKey, json);
+    }
+
+    private async Task ResetCategoryCustomization()
+    {
+        categoryStyles.Remove(editingCategoryId);
+        showCategoryCustomizationMenu = false;
+        var json = JsonSerializer.Serialize(categoryStyles);
+        await JS.InvokeVoidAsync("localStorage.setItem", CategoryStylesKey, json);
+    }
+
+    private void CloseCustomizationMenus()
+    {
+        showCategoryCustomizationMenu = false;
+        showOrderBackgroundMenu = false;
+        showActionButtonCustomizationMenu = false;
+    }
+
+    private string GetActionButtonStyle(string key)
+    {
+        var style = actionButtonStyles.TryGetValue(key, out var saved)
+            ? saved
+            : GetDefaultActionButtonStyle(key);
+
+        return $"background-color:{style.Background};color:{style.TextColor};border:1px solid {style.BorderColor};";
+    }
+
+    private static string GetActionButtonDisplayName(string key) => key switch
+    {
+        "reprint" => "Επανεκτύπωση παραγγελίας",
+        "bill" => "Λογαριασμός",
+        "cancel" => "Ακύρωση παραγγελίας",
+        "close" => "Κλείσιμο τραπεζιού",
+        _ => "Κουμπί ενέργειας"
+    };
+
+    private static ActionButtonStyle GetDefaultActionButtonStyle(string key) => key switch
+    {
+        "reprint" => new ActionButtonStyle { Background = "#e7edfa", TextColor = "#334b75", BorderColor = "#c7d5ee" },
+        "bill" => new ActionButtonStyle { Background = "#e7f3f8", TextColor = "#315a6b", BorderColor = "#c6e1eb" },
+        "cancel" => new ActionButtonStyle { Background = "#fdebea", TextColor = "#8e3c36", BorderColor = "#f2c5c1" },
+        "close" => new ActionButtonStyle { Background = "#e1f3e9", TextColor = "#2c6954", BorderColor = "#bfe2d1" },
+        _ => new ActionButtonStyle()
+    };
+
+    private void OpenActionButtonCustomization(string key, MouseEventArgs e)
+    {
+        showOrderBackgroundMenu = false;
+        showCategoryCustomizationMenu = false;
+        showActionButtonCustomizationMenu = true;
+        editingActionButtonKey = key;
+        editingActionButtonStyle = actionButtonStyles.TryGetValue(key, out var saved)
+            ? saved.Clone()
+            : GetDefaultActionButtonStyle(key);
+
+        // The menu opens next to the control while remaining inside the visible page.
+        actionCustomizationX = Math.Max(10, e.ClientX - 300);
+        actionCustomizationY = Math.Max(10, Math.Min(e.ClientY, 390));
+    }
+
+    private async Task SaveActionButtonCustomization()
+    {
+        actionButtonStyles[editingActionButtonKey] = editingActionButtonStyle.Clone();
+        showActionButtonCustomizationMenu = false;
+        var json = JsonSerializer.Serialize(actionButtonStyles);
+        await JS.InvokeVoidAsync("localStorage.setItem", ActionButtonStylesKey, json);
+    }
+
+    private async Task ResetActionButtonCustomization()
+    {
+        actionButtonStyles.Remove(editingActionButtonKey);
+        showActionButtonCustomizationMenu = false;
+        var json = JsonSerializer.Serialize(actionButtonStyles);
+        await JS.InvokeVoidAsync("localStorage.setItem", ActionButtonStylesKey, json);
+    }
+
+    private sealed class ActionButtonStyle
+    {
+        public string Background { get; set; } = "#e7edfa";
+        public string TextColor { get; set; } = "#334b75";
+        public string BorderColor { get; set; } = "#c7d5ee";
+
+        public ActionButtonStyle Clone() => new()
+        {
+            Background = Background,
+            TextColor = TextColor,
+            BorderColor = BorderColor
+        };
+    }
+
+    private sealed class CategoryStyle
+    {
+        public string Background { get; set; } = "#ffffff";
+        public string TextColor { get; set; } = "#202736";
+        public string BorderColor { get; set; } = "#d7dce5";
+        public int Width { get; set; } = 100;
+        public int Height { get; set; } = 48;
+        public int FontSize { get; set; } = 16;
+        public bool Bold { get; set; } = true;
+
+        public CategoryStyle Clone() => new()
+        {
+            Background = Background,
+            TextColor = TextColor,
+            BorderColor = BorderColor,
+            Width = Width,
+            Height = Height,
+            FontSize = FontSize,
+            Bold = Bold
+        };
+    }
+
+    private void OpenOrderBackgroundMenu(MouseEventArgs e)
+    {
+        orderBackgroundMenuX = Math.Min(e.ClientX, Math.Max(10, 300));
+        orderBackgroundMenuY = Math.Min(e.ClientY, Math.Max(10, 500));
+        editingPageBackground = pageBackground;
+        showOrderBackgroundMenu = true;
+    }
+
+    private async Task SaveOrderBackground()
+    {
+        pageBackground = editingPageBackground;
+        showOrderBackgroundMenu = false;
+        await JS.InvokeVoidAsync("localStorage.setItem", OrderBackgroundKey, pageBackground);
+    }
+
+    private async Task ResetOrderBackground()
+    {
+        var inheritedBackground = await JS.InvokeAsync<string?>("localStorage.getItem", TablesBackgroundKey);
+
+        pageBackground = !string.IsNullOrWhiteSpace(inheritedBackground)
+            ? inheritedBackground!
+            : DefaultBackground;
+
+        editingPageBackground = pageBackground;
+        showOrderBackgroundMenu = false;
+        await JS.InvokeVoidAsync("localStorage.removeItem", OrderBackgroundKey);
+    }
+
+    [Parameter] public int TableId { get; set; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private string tableName = "";
+
+
+
+
+
+
+
+    private List<MenuCategory> categories = new();
+
+
+
+
+
+
+
+    private Dictionary<int, List<MenuItem>> itemsByCategory = new();
+
+
+
+
+
+
+
+    private List<ExtraOption> allExtras = new();
+
+
+
+
+
+
+
+    private Order order = new() { Items = new() };
+
+
+
+
+
+
+
+    private CompanySettings? companySettings;
+
+
+
+
+
+
+
+    private string? statusMessage;
+
+    // Prevents double-click / concurrent sends to kitchen/bar.
+    private bool sendingToKitchen;
+
+
+
+
+
+
+
+    private OrderItem? pendingCancellationItem;
+
+
+
+    private bool showCancelModal;
+
+
+
+    private bool cancellationInProgress;
+
+
+
+    private string? cancellationError;
+
+
+
+
+
+
+
+    private bool showWholeOrderCancelModal;
+
+
+
+    private bool wholeOrderCancellationInProgress;
+
+
+
+    private string? wholeOrderCancellationError;
+
+
+
+
+
+
+
+    private int currentUserId;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private HashSet<int> expandedCategoryIds = new();
+    private int selectedCategoryId = 0;
+
+
+
+
+
+
+
+    private MenuItem? pendingItem;
+
+
+
+
+
+
+
+    private int pendingQty = 1;
+
+
+
+
+
+
+
+    private bool showExtraPanel = false;
+
+
+
+
+
+
+
+    private HashSet<int> pendingSelectedExtras = new();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    protected override async Task OnInitializedAsync()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+
+
+
+
+
+
+
+        currentUserId = int.Parse(authState.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        await LoadAsync();
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task LoadAsync()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        companySettings = await db.CompanySettings.FirstOrDefaultAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var table = await db.Tables.FindAsync(TableId);
+
+
+
+
+
+
+
+        tableName = table?.Name ?? "Άγνωστο τραπέζι";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        categories = await db.MenuCategories
+            .Where(c => c.IsActive)
+            .Include(c => c.PrinterStation)
+            .Include(c => c.PrinterStations)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+        if (categories.Count == 0)
+            selectedCategoryId = 0;
+        else if (!categories.Any(c => c.Id == selectedCategoryId))
+            selectedCategoryId = categories[0].Id;
+
+
+
+
+
+
+
+        var allItems = await db.MenuItems.Where(i => i.IsAvailable).OrderBy(i => i.Name).ToListAsync();
+
+
+
+
+
+
+
+        itemsByCategory = categories.ToDictionary(c => c.Id, c => allItems.Where(i => i.MenuCategoryId == c.Id).ToList());
+
+
+
+
+
+
+
+        allExtras = await db.ExtraOptions.OrderBy(e => e.Name).ToListAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        // Rebuild the paid quantities from successfully issued split payments on every reload.
+        // The original OrderItem.Quantity remains the ordered quantity; the UI displays only unpaid quantity.
+        paidQuantitiesByItem = new Dictionary<int, int>();
+        var openOrderForPayments = await db.Orders
+            .Where(o => o.RestaurantTableId == TableId && o.Status == OrderStatus.Open)
+            .Select(o => o.Id)
+            .FirstOrDefaultAsync();
+        if (openOrderForPayments > 0)
+        {
+            paidQuantitiesByItem = await db.OrderPaymentItems
+                .Where(pi => pi.OrderPayment != null
+                    && pi.OrderPayment.OrderId == openOrderForPayments
+                    && pi.OrderPayment.FiscalStatus == FiscalStatus.Issued)
+                .GroupBy(pi => pi.OrderItemId)
+                .Select(g => new { OrderItemId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+                .ToDictionaryAsync(x => x.OrderItemId, x => x.Quantity);
+        }
+
+        var existing = await db.Orders
+
+
+
+
+
+
+
+            .Include(o => o.Items).ThenInclude(i => i.MenuItem)
+
+
+
+
+
+
+
+            .FirstOrDefaultAsync(o => o.RestaurantTableId == TableId && o.Status == OrderStatus.Open);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if (existing is null)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            existing = new Order { RestaurantTableId = TableId, WaiterUserId = currentUserId, Status = OrderStatus.Open };
+
+
+
+
+
+
+
+            db.Orders.Add(existing);
+
+
+
+
+
+
+
+            await db.SaveChangesAsync();
+
+
+
+
+
+
+
+            existing = await db.Orders.Include(o => o.Items).ThenInclude(i => i.MenuItem)
+
+
+
+
+
+
+
+                .FirstAsync(o => o.Id == existing.Id);
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        order = existing;
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private void SelectCategory(int categoryId)
+    {
+        selectedCategoryId = categoryId;
+        CancelPending();
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task SelectItem(MenuItem item)
+    {
+        // Εάν το προϊόν έχει extra συνδεδεμένα με την κατηγορία του,
+        // ζητάμε πρώτα επιλογή. Διαφορετικά προστίθεται άμεσα όπως πριν.
+        var availableExtras = allExtras
+            .Where(e => e.MenuCategoryId == null || e.MenuCategoryId == item.MenuCategoryId)
+            .ToList();
+
+        if (availableExtras.Count > 0)
+        {
+            pendingItem = item;
+            pendingQty = 1;
+            pendingSelectedExtras.Clear();
+            showExtraPanel = true;
+            statusMessage = null;
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var existingLine = await db.OrderItems.FirstOrDefaultAsync(oi =>
+            oi.OrderId == order.Id &&
+            oi.MenuItemId == item.Id &&
+            !oi.IsPrinted &&
+            !oi.IsCancelled &&
+            string.IsNullOrEmpty(oi.Notes));
+
+        if (existingLine is not null)
+        {
+            existingLine.Quantity += 1;
+        }
+        else
+        {
+            db.OrderItems.Add(new OrderItem
+            {
+                OrderId = order.Id,
+                MenuItemId = item.Id,
+                Quantity = 1,
+                Notes = null,
+                ExtrasPrice = 0m
+            });
+        }
+
+        await db.SaveChangesAsync();
+        statusMessage = null;
+        await LoadAsync();
+    }
+
+    private void CancelPending()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        pendingItem = null;
+
+
+
+
+
+
+
+        pendingQty = 1;
+
+
+
+
+
+
+
+        pendingSelectedExtras.Clear();
+
+
+
+
+
+
+
+        showExtraPanel = false;
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private List<ExtraOption> ExtrasForCurrentItem()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        if (pendingItem is null) return new();
+
+
+
+
+
+
+
+        return allExtras
+
+
+
+
+
+
+
+            .Where(e => e.MenuCategoryId == null || e.MenuCategoryId == pendingItem.MenuCategoryId)
+
+
+
+
+
+
+
+            .ToList();
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private void ToggleExtra(int extraId)
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        if (!pendingSelectedExtras.Add(extraId))
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            pendingSelectedExtras.Remove(extraId);
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task ConfirmAddItem()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        if (pendingItem is null) return;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var selectedExtras = allExtras.Where(e => pendingSelectedExtras.Contains(e.Id)).ToList();
+
+
+
+
+
+
+
+        var notes = string.Join(", ", selectedExtras.Select(e => e.Name));
+
+
+
+
+
+
+
+        var extrasPrice = selectedExtras.Sum(e => e.Price);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        // Ίδιο είδος με ίδιες σημειώσεις -> αύξηση ποσότητας, αλλιώς νέα γραμμή
+
+
+
+
+
+
+
+        var existingLine = await db.OrderItems.FirstOrDefaultAsync(oi =>
+
+
+
+
+
+
+
+            oi.OrderId == order.Id && oi.MenuItemId == pendingItem.Id && !oi.IsPrinted && !oi.IsCancelled &&
+
+
+
+
+
+
+
+            (oi.Notes ?? "") == notes);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if (existingLine is not null)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            existingLine.Quantity += pendingQty;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        else
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            db.OrderItems.Add(new OrderItem
+
+            {
+
+                OrderId = order.Id,
+
+                MenuItemId = pendingItem.Id,
+
+                Quantity = pendingQty,
+
+                Notes = string.IsNullOrWhiteSpace(notes) ? null : notes,
+
+                ExtrasPrice = extrasPrice
+
+            });
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        await db.SaveChangesAsync();
+
+
+
+
+
+
+
+        statusMessage = null;
+
+
+
+
+
+
+
+        CancelPending();
+
+
+
+
+
+
+
+        await LoadAsync();
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private double? orderItemPointerStartX;
+    private double? orderItemPointerStartY;
+    private int? orderItemPointerItemId;
+    private bool suppressNextOrderItemTap;
+
+    private void OrderItemPointerDown(OrderItem item, PointerEventArgs e)
+    {
+        orderItemPointerStartX = e.ClientX;
+        orderItemPointerStartY = e.ClientY;
+        orderItemPointerItemId = item.Id;
+        suppressNextOrderItemTap = false;
+    }
+
+    private async Task OrderItemPointerUp(OrderItem item, PointerEventArgs e)
+    {
+        if (orderItemPointerItemId != item.Id || orderItemPointerStartX is null || orderItemPointerStartY is null)
+            return;
+
+        var deltaX = e.ClientX - orderItemPointerStartX.Value;
+        var deltaY = e.ClientY - orderItemPointerStartY.Value;
+        orderItemPointerStartX = null;
+        orderItemPointerStartY = null;
+        orderItemPointerItemId = null;
+
+        // Swipe left only; ignore vertical scrolling and short movements.
+        if (deltaX <= -55 && Math.Abs(deltaX) > Math.Abs(deltaY) * 1.25)
+        {
+            suppressNextOrderItemTap = true;
+            await DecreasePendingOrderItemByOne(item);
+        }
+    }
+
+    private async Task HandleOrderItemTap(OrderItem item)
+    {
+        if (suppressNextOrderItemTap)
+        {
+            suppressNextOrderItemTap = false;
+            return;
+        }
+
+        // Items already sent to the kitchen/bar are immutable here; use the existing cancellation flow.
+        if (item.IsPrinted || item.IsCancelled)
+            return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var dbItem = await db.OrderItems.FirstOrDefaultAsync(i => i.Id == item.Id);
+        if (dbItem is null || dbItem.IsPrinted || dbItem.IsCancelled)
+            return;
+
+        dbItem.Quantity += 1;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task DecreasePendingOrderItemByOne(OrderItem item)
+    {
+        if (item.IsPrinted || item.IsCancelled)
+            return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var dbItem = await db.OrderItems.FirstOrDefaultAsync(i => i.Id == item.Id);
+        if (dbItem is null || dbItem.IsPrinted || dbItem.IsCancelled)
+            return;
+
+        if (dbItem.Quantity <= 1)
+            db.OrderItems.Remove(dbItem);
+        else
+            dbItem.Quantity -= 1;
+
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task RemoveItemFromPendingOrder(OrderItem oi)
+    {
+        // Όσο το είδος δεν έχει σταλεί, το Χ το αφαιρεί άμεσα από τα προς αποστολή.
+        // Αν έχει ήδη σταλεί, κρατάμε την υπάρχουσα διαδικασία φορολογικής ακύρωσης.
+        if (oi.IsPrinted)
+        {
+            BeginCancelItem(oi);
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+
+        var dbItem = await db.OrderItems.FirstOrDefaultAsync(i => i.Id == oi.Id);
+        if (dbItem is null)
+            return;
+
+        db.OrderItems.Remove(dbItem);
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+
+
+    private void BeginCancelItem(OrderItem oi)
+
+
+
+    {
+
+
+
+        pendingCancellationItem = oi;
+
+
+
+        cancellationError = null;
+
+
+
+        showCancelModal = true;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void CloseCancelModal()
+
+
+
+    {
+
+
+
+        if (cancellationInProgress) return;
+
+
+
+        showCancelModal = false;
+
+
+
+        pendingCancellationItem = null;
+
+
+
+        cancellationError = null;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task ConfirmCancelItem()
+
+
+
+    {
+
+
+
+        if (pendingCancellationItem is null || cancellationInProgress)
+
+
+
+            return;
+
+
+
+
+
+
+
+        cancellationInProgress = true;
+
+
+
+        cancellationError = null;
+
+
+
+
+
+
+
+        try
+
+
+
+        {
+
+
+
+            var itemId = pendingCancellationItem.Id;
+
+
+
+            var wasPrinted = pendingCancellationItem.IsPrinted;
+
+
+
+            var itemName = pendingCancellationItem.MenuItem?.Name ?? "Είδος";
+
+
+
+
+
+
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+            var dbOrder = await db.Orders
+
+
+
+                .Include(o => o.RestaurantTable)
+
+
+
+                .FirstOrDefaultAsync(o => o.Id == order.Id);
+
+
+
+
+
+
+
+            if (dbOrder is null)
+
+
+
+            {
+
+
+
+                cancellationError = "Η παραγγελία δεν βρέθηκε.";
+
+
+
+                return;
+
+
+
+            }
+
+
+
+
+
+
+
+            var result = wasPrinted
+
+
+
+                ? await Fiscal.CancelSentOrderItemAsync(db, dbOrder, itemId)
+
+
+
+                : await Fiscal.CancelSentOrderItemAsync(db, dbOrder, itemId);
+
+
+
+
+
+
+
+            if (!result.Success)
+
+
+
+            {
+
+
+
+                cancellationError = result.ErrorMessage ?? "Απέτυχε η ακύρωση.";
+
+
+
+                return;
+
+
+
+            }
+
+
+
+
+
+
+
+            var cancellationPrintFailed = false;
+            if (wasPrinted && result.Mark is not null)
+            {
+
+
+
+                var cancelledDbItem = await db.OrderItems
+
+
+
+                    .Include(i => i.MenuItem).ThenInclude(i => i!.MenuCategory).ThenInclude(c => c!.PrinterStations)
+
+
+
+                    .FirstOrDefaultAsync(i => i.Id == itemId);
+
+
+
+                var settings = await db.CompanySettings.FirstOrDefaultAsync();
+
+
+
+                var waiter = await db.Users.FindAsync(currentUserId);
+
+
+
+                var stations = GetCategoryPrinters(cancelledDbItem?.MenuItem?.MenuCategory);
+                foreach (var station in stations)
+                {
+                    var printed = await Printer.PrintOrderFormAsync(
+                        station,
+                        tableName,
+                        waiter?.FullName ?? "-",
+                        new[] { (ItemName: itemName, Quantity: 1, LineTotal: 0m, Notes: "ΑΚΥΡΩΘΗΚΕ", VatPercent: 0m) },
+                        result.Mark,
+                        result.QrCode,
+                        settings,
+                        "ΑΚΥΡΩΤΙΚΟ ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ");
+                    if (!printed) cancellationPrintFailed = true;
+                }
+
+
+
+            }
+
+
+
+
+
+
+
+            statusMessage = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                ? $"Ακυρώθηκε: {itemName}."
+                : result.ErrorMessage;
+            if (cancellationPrintFailed)
+                statusMessage += " ⚠ Η ακύρωση καταχωρήθηκε, αλλά απέτυχε η εκτύπωση του ακυρωτικού σε έναν ή περισσότερους εκτυπωτές.";
+
+
+
+
+
+
+
+            // Αν αυτό ήταν το τελευταίο ενεργό είδος, δεν πρέπει να μείνει
+
+
+
+            // ανοιχτή η παραγγελία με σύνολο €0. Κλείνουμε το Point of Service
+
+
+
+            // στον Parochos και την Order τοπικά.
+
+
+
+            var hasActiveItems = await db.OrderItems
+
+
+
+                .AnyAsync(i => i.OrderId == dbOrder.Id && !i.IsCancelled);
+
+
+
+
+
+
+
+            if (!hasActiveItems)
+
+
+
+            {
+
+
+
+                var emptyClose = await Fiscal.CloseEmptyOrderAsync(db, dbOrder);
+
+
+
+
+
+
+
+                if (!emptyClose.Success)
+
+
+
+                {
+
+
+
+                    cancellationError =
+
+
+
+                        "Το είδος ακυρώθηκε, αλλά δεν μπόρεσε να κλείσει το τραπέζι: " +
+
+
+
+                        emptyClose.ErrorMessage;
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+
+
+
+
+                dbOrder.Status = OrderStatus.Closed;
+
+
+
+                dbOrder.ClosedAt = DateTime.Now;
+
+
+
+                await db.SaveChangesAsync();
+
+
+
+
+
+
+
+                statusMessage = "Ακυρώθηκε το τελευταίο είδος και το τραπέζι έκλεισε.";
+
+
+
+                showCancelModal = false;
+
+
+
+                pendingCancellationItem = null;
+
+
+
+                await LoadAsync();
+
+
+
+                return;
+
+
+
+            }
+
+
+
+
+
+
+
+            showCancelModal = false;
+
+
+
+            pendingCancellationItem = null;
+
+
+
+            await LoadAsync();
+
+
+
+        }
+
+
+
+        catch (Exception ex)
+
+
+
+        {
+
+
+
+            cancellationError = $"Σφάλμα ακύρωσης: {ex.Message}";
+
+
+
+        }
+
+
+
+        finally
+
+
+
+        {
+
+
+
+            cancellationInProgress = false;
+
+
+
+        }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void BeginCancelWholeOrder()
+
+
+
+    {
+
+
+
+        wholeOrderCancellationError = null;
+
+
+
+        showWholeOrderCancelModal = true;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void CloseWholeOrderCancelModal()
+
+
+
+    {
+
+
+
+        if (wholeOrderCancellationInProgress) return;
+
+
+
+
+
+
+
+        showWholeOrderCancelModal = false;
+
+
+
+        wholeOrderCancellationError = null;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task ConfirmCancelWholeOrder()
+
+
+
+    {
+
+
+
+        if (wholeOrderCancellationInProgress)
+
+
+
+            return;
+
+
+
+
+
+
+
+        wholeOrderCancellationInProgress = true;
+
+
+
+        wholeOrderCancellationError = null;
+
+
+
+
+
+
+
+        try
+
+
+
+        {
+
+
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+            var dbOrder = await db.Orders
+
+
+
+                .Include(o => o.RestaurantTable)
+
+
+
+                .Include(o => o.Items)
+
+
+
+                .FirstOrDefaultAsync(o => o.Id == order.Id);
+
+
+
+
+
+
+
+            if (dbOrder is null)
+
+
+
+            {
+
+
+
+                wholeOrderCancellationError = "Η παραγγελία δεν βρέθηκε.";
+
+
+
+                return;
+
+
+
+            }
+
+
+
+
+
+
+
+            var activeItems = dbOrder.Items.Where(i => !i.IsCancelled).ToList();
+
+
+
+
+
+
+
+            if (activeItems.Count == 0)
+
+
+
+            {
+
+
+
+                var emptyClose = await Fiscal.CloseEmptyOrderAsync(db, dbOrder);
+
+
+
+
+
+
+
+                if (!emptyClose.Success)
+
+
+
+                {
+
+
+
+                    wholeOrderCancellationError = emptyClose.ErrorMessage;
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+            }
+
+
+
+            else
+
+
+
+            {
+
+
+
+                var result = await Fiscal.CancelWholeOrderAsync(
+
+
+
+                    db,
+
+
+
+                    dbOrder,
+
+
+
+                    "Ακύρωση ολόκληρης παραγγελίας από τον σερβιτόρο");
+
+
+
+
+
+
+
+                if (!result.Success)
+
+
+
+                {
+
+
+
+                    wholeOrderCancellationError =
+
+
+
+                        result.ErrorMessage ?? "Απέτυχε η ακύρωση της παραγγελίας.";
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+            }
+
+
+
+
+
+
+
+            dbOrder.Status = OrderStatus.Closed;
+
+
+
+            dbOrder.ClosedAt = DateTime.Now;
+
+
+
+            await db.SaveChangesAsync();
+
+
+
+
+
+
+
+            showWholeOrderCancelModal = false;
+
+
+
+            statusMessage = "Η παραγγελία ακυρώθηκε και το τραπέζι έκλεισε.";
+
+
+
+            await LoadAsync();
+
+
+
+        }
+
+
+
+        catch (Exception ex)
+
+
+
+        {
+
+
+
+            wholeOrderCancellationError = $"Σφάλμα ακύρωσης παραγγελίας: {ex.Message}";
+
+
+
+        }
+
+
+
+        finally
+
+
+
+        {
+
+
+
+            wholeOrderCancellationInProgress = false;
+
+
+
+        }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task SendToKitchen()
+
+
+
+
+
+
+
+    {
+        if (sendingToKitchen)
+            return;
+
+        sendingToKitchen = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+
+
+
+
+
+
+
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var pending = await db.OrderItems
+
+
+
+
+
+
+
+                .Include(oi => oi.MenuItem).ThenInclude(mi => mi!.MenuCategory).ThenInclude(c => c!.PrinterStations)
+
+
+
+
+
+
+
+                .Where(oi => oi.OrderId == order.Id && !oi.IsPrinted && !oi.IsCancelled)
+
+
+
+
+
+
+
+                .ToListAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (!pending.Any())
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                statusMessage = "Δεν υπάρχουν νέα είδη για αποστολή.";
+
+
+
+
+
+
+
+                return;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var waiterUser = await db.Users.FindAsync(currentUserId);
+
+
+
+
+
+
+
+            var companySettings = await db.CompanySettings.FirstOrDefaultAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var fiscalOrder = await db.Orders.Include(o => o.RestaurantTable).FirstOrDefaultAsync(o => o.Id == order.Id);
+
+
+
+
+
+
+
+            FiscalIssueResult orderFormResult;
+
+
+
+
+
+
+
+            try
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                orderFormResult = fiscalOrder is not null
+
+
+
+
+
+
+
+                    ? await Fiscal.IssueOrderFormAsync(db, fiscalOrder, pending)
+
+
+
+
+
+
+
+                    : new FiscalIssueResult { Success = true };
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+            catch (Exception ex)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                orderFormResult = new FiscalIssueResult { Success = false, ErrorMessage = ex.Message };
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // ============================================================
+
+
+
+
+
+
+
+            // ΕΚΤΥΠΩΣΗ ΔΕΛΤΙΟΥ ΠΑΡΑΓΓΕΛΙΑΣ
+
+
+
+
+
+
+
+            // ============================================================
+
+
+
+
+
+
+
+            if (orderFormResult.Success)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                try
+
+
+
+
+
+
+
+                {
+
+
+
+
+
+
+
+                    var orderFormStations = pending
+                        .SelectMany(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory))
+                        .DistinctBy(s => s.Id)
+                        .ToList();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    var orderFormItems = pending.Select(oi => (
+
+
+
+
+
+
+
+                        ItemName: oi.MenuItem!.Name,
+
+
+
+
+
+
+
+                        Quantity: oi.Quantity,
+
+
+
+
+
+
+
+                        LineTotal: oi.Quantity * ((oi.MenuItem?.Price ?? 0) + oi.ExtrasPrice),
+
+
+
+
+
+
+
+                        Notes: oi.Notes,
+
+
+
+
+
+
+
+                        VatPercent: oi.MenuItem?.VatPercentOverride
+
+
+
+
+
+
+
+                                    ?? oi.MenuItem?.MenuCategory?.VatPercent
+
+
+
+
+
+
+
+                                    ?? 24m
+
+
+
+
+
+
+
+                    )).ToList();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    foreach (var station in orderFormStations)
+
+
+
+
+
+
+
+                    {
+
+
+
+
+
+
+
+                        var printed = await Printer.PrintOrderFormAsync(
+
+
+
+
+
+
+
+                            station,
+
+
+
+
+
+
+
+                            tableName,
+
+
+
+
+
+
+
+                            waiterUser?.FullName ?? "-",
+
+
+
+
+
+
+
+                            orderFormItems,
+
+
+
+
+
+
+
+                            orderFormResult.Mark,
+
+
+
+
+
+
+
+                            orderFormResult.QrCode,
+
+
+
+
+
+
+
+                            companySettings);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                        if (!printed)
+
+
+
+
+
+
+
+                        {
+
+
+
+
+
+
+
+                            statusMessage +=
+
+
+
+
+
+
+
+                                $" ⚠ Αποτυχία εκτύπωσης Δελτίου Παραγγελίας σε: {station.Name}.";
+
+
+
+
+
+
+
+                        }
+
+
+
+
+
+
+
+                    }
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+                catch (Exception ex)
+
+
+
+
+
+
+
+                {
+
+
+
+
+
+
+
+                    statusMessage +=
+
+
+
+
+
+
+
+                        $" ⚠ Σφάλμα εκτύπωσης Δελτίου Παραγγελίας: {ex.Message}";
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var withPrinter = pending.Where(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory).Count > 0).ToList();
+            var withoutPrinter = pending.Where(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory).Count == 0).ToList();
+            var groups = withPrinter
+                .SelectMany(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory)
+                    .Select(station => new { Station = station, Item = oi }))
+                .GroupBy(x => x.Station)
+                .ToList();
+            var successStations = new List<string>();
+            var failedStations = new List<string>();
+            var itemsWithFailedPrinter = new HashSet<int>();
+            foreach (var group in groups)
+            {
+                var station = group.Key;
+                var ticketItems = group.Select(x => x.Item).Select(oi => (
+                    Name: oi.MenuItem!.Name,
+                    Quantity: oi.Quantity,
+                    LineTotal: oi.Quantity * ((oi.MenuItem?.Price ?? 0) + oi.ExtrasPrice),
+                    Notes: oi.Notes,
+                    VatPercent: oi.MenuItem?.VatPercentOverride ?? oi.MenuItem?.MenuCategory?.VatPercent ?? 24m)).ToList();
+                var ok = await Printer.PrintTicketAsync(station, tableName, waiterUser?.FullName ?? "-", ticketItems, companySettings);
+                if (ok)
+                {
+                    successStations.Add(station.Name);
+                }
+                else
+                {
+                    failedStations.Add(station.Name);
+                    foreach (var routedItem in group) itemsWithFailedPrinter.Add(routedItem.Item.Id);
+                }
+            }
+            // Ένα είδος χαρακτηρίζεται ως απεσταλμένο μόνο όταν πέτυχαν όλοι οι εκτυπωτές του.
+            if (orderFormResult.Success)
+            {
+                foreach (var oi in withPrinter.Where(oi => !itemsWithFailedPrinter.Contains(oi.Id)).Concat(withoutPrinter))
+                {
+                    oi.IsPrinted = true;
+                    oi.PrintedAt = DateTime.Now;
+                }
+            }
+            // Τα είδη χωρίς εκτυπωτή έχουν ενημερωθεί μαζί με τα υπόλοιπα μόνο αν πέτυχε το Δελτίο Παραγγελίας.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            await db.SaveChangesAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            statusMessage = successStations.Any()
+
+
+
+
+
+
+
+                ? $"Στάλθηκε σε: {string.Join(", ", successStations)}."
+
+
+
+
+
+
+
+                : "Η παραγγελία καταχωρήθηκε.";
+
+
+
+
+
+
+
+            if (failedStations.Any())
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                statusMessage += $" ⚠ Αποτυχία εκτύπωσης σε: {string.Join(", ", failedStations)} (η παραγγελία πάρθηκε κανονικά, απλά δεν τυπώθηκε εκεί).";
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+            if (withoutPrinter.Any())
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                var missingCategories = withoutPrinter
+
+
+
+
+
+
+
+                    .Select(oi => oi.MenuItem?.MenuCategory?.Name ?? "χωρίς κατηγορία")
+
+
+
+
+
+
+
+                    .Distinct();
+
+
+
+
+
+
+
+                statusMessage += $" ℹ Χωρίς εκτυπωτή (δεν τυπώθηκαν, καταχωρήθηκαν κανονικά): {string.Join(", ", missingCategories)}.";
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+            if (!orderFormResult.Success)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                statusMessage += $" ⚠ ΠΡΟΣΟΧΗ: απέτυχε η έκδοση φορολογικού Δελτίου Παραγγελίας στην ΑΑΔΕ: {orderFormResult.ErrorMessage}";
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            await JS.InvokeVoidAsync("playBeep");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            await LoadAsync();
+
+
+
+
+
+
+
+        }
+        finally
+        {
+            sendingToKitchen = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+    private async Task ReprintOrder()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+
+        var activeItems = await db.OrderItems
+            .Include(oi => oi.MenuItem).ThenInclude(mi => mi!.MenuCategory).ThenInclude(c => c!.PrinterStations)
+            .Where(oi => oi.OrderId == order.Id && !oi.IsCancelled)
+            .OrderBy(oi => oi.Id)
+            .ToListAsync();
+
+        if (!activeItems.Any())
+        {
+            statusMessage = "Δεν υπάρχουν ενεργά είδη για επανεκτύπωση.";
+            return;
+        }
+
+        var waiterUser = await db.Users.FindAsync(currentUserId);
+        var withPrinter = activeItems
+            .SelectMany(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory)
+                .Select(station => new { Station = station, Item = oi }))
+            .GroupBy(x => x.Station)
+            .ToList();
+
+        if (!withPrinter.Any())
+        {
+            statusMessage = "Δεν υπάρχουν ενεργά είδη με αντιστοιχισμένο εκτυπωτή.";
+            return;
+        }
+
+        var printed = new List<string>();
+        var failed = new List<string>();
+        foreach (var group in withPrinter)
+        {
+            var ticketItems = group.Select(x => x.Item).Select(oi => (
+                ItemName: oi.MenuItem!.Name,
+                Quantity: oi.Quantity,
+                LineTotal: oi.Quantity * ((oi.MenuItem?.Price ?? 0m) + oi.ExtrasPrice),
+                Notes: oi.Notes,
+                VatPercent: oi.MenuItem?.VatPercentOverride ?? oi.MenuItem?.MenuCategory?.VatPercent ?? 24m
+            )).ToList();
+
+            var ok = await Printer.PrintTicketAsync(
+                group.Key,
+                tableName,
+                waiterUser?.FullName ?? "-",
+                ticketItems,
+                companySettings);
+
+            if (ok) printed.Add(group.Key.Name);
+            else failed.Add(group.Key.Name);
+        }
+
+        statusMessage = printed.Any()
+            ? $"Η επανεκτύπωση ολοκληρώθηκε σε: {string.Join(", ", printed)}."
+            : "Η επανεκτύπωση απέτυχε.";
+        if (failed.Any())
+            statusMessage += $" Αποτυχία σε: {string.Join(", ", failed)}.";
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task PrintBill()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var allItems = await db.OrderItems
+
+
+
+
+
+
+
+            .Include(oi => oi.MenuItem).ThenInclude(mi => mi!.MenuCategory).ThenInclude(c => c!.PrinterStations)
+
+
+
+
+
+
+
+            .Where(oi => oi.OrderId == order.Id && !oi.IsCancelled)
+
+
+
+
+
+
+
+            .ToListAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if (!allItems.Any())
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            statusMessage = "Δεν υπάρχουν είδη στην παραγγελία για λογαριασμό.";
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var waiterUser = await db.Users.FindAsync(currentUserId);
+
+
+
+
+
+
+
+        var companySettings = await db.CompanySettings.FirstOrDefaultAsync();
+
+
+
+
+
+
+
+        var billItems = allItems.Select(oi => (
+
+
+
+
+
+
+
+            Name: oi.MenuItem!.Name,
+
+
+
+
+
+
+
+            Quantity: oi.Quantity,
+
+
+
+
+
+
+
+            LineTotal: oi.Quantity * ((oi.MenuItem?.Price ?? 0) + oi.ExtrasPrice),
+
+
+
+
+
+
+
+            Notes: oi.Notes,
+
+
+
+
+
+
+
+            VatPercent: oi.MenuItem?.VatPercentOverride ?? oi.MenuItem?.MenuCategory?.VatPercent ?? 24m)).ToList();
+
+
+
+
+
+
+
+        var total = billItems.Sum(i => i.LineTotal);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var stations = allItems
+            .SelectMany(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory))
+            .DistinctBy(s => s.Id)
+            .ToList();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if (!stations.Any())
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            statusMessage = "⚠ Δεν υπάρχει κανένας εκτυπωτής συνδεδεμένος με τα είδη αυτού του τραπεζιού.";
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        var printed = new List<string>();
+
+
+
+
+
+
+
+        var failed = new List<string>();
+
+
+
+
+
+
+
+        foreach (var station in stations)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            var ok = await Printer.PrintBillAsync(station, tableName, waiterUser?.FullName ?? "-", billItems, total, companySettings);
+
+
+
+
+
+
+
+            if (ok) printed.Add(station.Name); else failed.Add(station.Name);
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        statusMessage = printed.Any() ? $"Ο λογαριασμός τυπώθηκε σε: {string.Join(", ", printed)}." : "";
+
+
+
+
+
+
+
+        if (failed.Any())
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            statusMessage += $" ⚠ Αποτυχία εκτύπωσης λογαριασμού σε: {string.Join(", ", failed)}.";
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private bool showPaymentModal;
+
+
+
+
+
+
+
+    private int closeStep;
+
+
+
+
+
+
+
+    private PaymentMethod selectedPaymentMethod;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private string counterpartVat = "";
+
+
+
+
+
+
+
+    private string counterpartName = "";
+
+
+
+
+
+
+
+    private string counterpartStreet = "";
+
+
+
+
+
+
+
+    private string counterpartCity = "";
+
+
+
+
+
+
+
+    private string counterpartPostalCode = "";
+
+
+
+
+
+
+
+    private string? fiscalError;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private bool aadeLookupInProgress;
+
+
+
+
+
+
+
+    private bool aadeCustomerFound;
+
+
+
+
+
+
+
+    private string? aadeLookupError;
+
+
+
+
+
+
+
+    private string counterpartDoy = "";
+
+
+
+
+
+
+
+    private string counterpartMainActivity = "";
+
+
+
+
+
+
+
+    private string counterpartLegalStatus = "";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private string NormalizedCounterpartVat =>
+
+
+
+
+
+
+
+        new string((counterpartVat ?? "").Where(char.IsDigit).ToArray());
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private string? lastDocumentLabel;
+
+
+
+
+
+
+
+    private string? lastSeriesAndNumber;
+
+
+
+
+
+
+
+    private long? lastMark;
+
+
+
+
+
+
+
+    private string? lastPdfUrl;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private CardPaymentPreparation? pendingCardPayment;
+    private bool edpsRetryWithFreshProviderData;
+    private bool edpsStatusCheckRequired;
+    private bool cardFiscalRetryOnly;
+    private bool cardFiscalRetryRequiresRecovery;
+
+
+
+
+
+
+
+    private string cardTransactionId = "";
+    private bool epayBusy;
+    private List<EpayWebEcrService.TerminalChoice> epayTerminals = new();
+    private string selectedEpayBackendId = "";
+    private int selectedEpaySettingsId;
+    private string selectedEpayProviderCode = "";
+    private List<BankPosTerminalSettings> cardPosSettings = new();
+    private int selectedCardPosSettingsId;
+    private BankPosTerminalSettings? SelectedCardPosSetting => cardPosSettings.FirstOrDefault(x => x.Id == selectedCardPosSettingsId);
+    private bool IsSelectedMellonWebEcr => CommonWebEcrProviderProfile.IsCommonRest(SelectedCardPosSetting);
+    private void CardPosChanged()
+    {
+        epayTerminals.Clear(); selectedEpayBackendId = ""; selectedEpaySettingsId = 0;
+        fiscalError = null;
+    }
+    private bool IsSelectedVivaCloud => SelectedCardPosSetting is { Provider: var vivaProvider, Protocol: var vivaProtocol } &&
+        vivaProvider.Equals("Viva", StringComparison.OrdinalIgnoreCase) && vivaProtocol.Equals("Viva Cloud", StringComparison.OrdinalIgnoreCase);
+    private bool vivaStatusCheckRequired;
+    private string? vivaPendingSessionId;
+    private bool IsSelectedEdpsWebEcr => SelectedCardPosSetting is { Provider: var provider, Protocol: var protocol } &&
+        provider.Equals("EDPS", StringComparison.OrdinalIgnoreCase) &&
+        protocol.Contains("WebECR API v6", StringComparison.OrdinalIgnoreCase);
+
+
+
+
+
+
+
+    private string pendingCardTerminalId = "";
+
+
+
+
+
+
+
+    private decimal pendingCardAmount;
+
+
+
+
+
+
+
+    private FiscalDocumentKind pendingCardDocumentKind = FiscalDocumentKind.Receipt;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private List<OrderItem> splitPaymentItems = new();
+
+    private Dictionary<int, int> splitQuantities = new();
+
+    private Dictionary<int, int> paidQuantitiesByItem = new();
+
+    private FiscalDocumentKind splitDocumentKind = FiscalDocumentKind.Receipt;
+
+    private bool isSplitPaymentFlow;
+
+    private CardPaymentPreparation? splitPendingCardPayment;
+
+
+
+    private int RemainingQuantityForItem(OrderItem item)
+    {
+        var paid = paidQuantitiesByItem.TryGetValue(item.Id, out var q) ? q : 0;
+        return Math.Max(0, item.Quantity - paid);
+    }
+
+    private decimal CurrentOrderTotal => order.Items.Where(i => !i.IsCancelled)
+        .Sum(i => RemainingQuantityForItem(i) * ((i.MenuItem?.Price ?? 0) + i.ExtrasPrice));
+
+    private decimal SplitSelectedTotal => splitPaymentItems.Sum(i =>
+    {
+        var q = splitQuantities.TryGetValue(i.Id, out var selected) ? selected : 0;
+        return q * ((i.MenuItem?.Price ?? 0) + i.ExtrasPrice);
+    });
+
+
+
+    private async Task BeginSplitPayment()
+
+    {
+
+        fiscalError = null;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+
+        var activeSplitItems = await db.OrderItems.Include(i => i.MenuItem).ThenInclude(m => m!.MenuCategory)
+            .Where(i => i.OrderId == order.Id && !i.IsCancelled && i.Quantity > 0).OrderBy(i => i.Id).ToListAsync();
+        var paid = await db.OrderPaymentItems
+            .Where(pi => pi.OrderPayment != null && pi.OrderPayment.OrderId == order.Id && pi.OrderPayment.FiscalStatus == FiscalStatus.Issued)
+            .GroupBy(pi => pi.OrderItemId).Select(g => new { OrderItemId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+            .ToDictionaryAsync(x => x.OrderItemId, x => x.Quantity);
+        splitPaymentItems = activeSplitItems.Select(i =>
+        {
+            var alreadyPaid = paid.TryGetValue(i.Id, out var q) ? q : 0;
+            var remaining = i.Quantity - alreadyPaid;
+            if (remaining <= 0) return null;
+            return new OrderItem { Id = i.Id, OrderId = i.OrderId, MenuItemId = i.MenuItemId, MenuItem = i.MenuItem, Quantity = remaining, ExtrasPrice = i.ExtrasPrice, Notes = i.Notes, IsCancelled = false };
+        }).Where(i => i is not null).Select(i => i!).ToList();
+        splitQuantities = splitPaymentItems.ToDictionary(i => i.Id, _ => 0);
+
+        if (splitPaymentItems.Count == 0)
+
+        {
+
+            fiscalError = "Δεν υπάρχουν ενεργά είδη για split πληρωμή.";
+
+            return;
+
+        }
+
+        isSplitPaymentFlow = true;
+
+        closeStep = 7;
+
+    }
+
+
+
+    private void SetSplitQuantity(int itemId, string? value)
+
+    {
+
+        if (!int.TryParse(value, out var q)) q = 0;
+
+        var item = splitPaymentItems.FirstOrDefault(i => i.Id == itemId);
+
+        splitQuantities[itemId] = Math.Clamp(q, 0, item?.Quantity ?? 0);
+
+    }
+
+
+
+    private void ContinueSplitPayment()
+
+    {
+
+        fiscalError = null;
+
+        if (SplitSelectedTotal <= 0)
+
+        {
+
+            fiscalError = "Επίλεξε τουλάχιστον ένα τεμάχιο.";
+
+            return;
+
+        }
+
+        closeStep = 8;
+
+    }
+
+
+
+    private async Task SelectSplitPayment(PaymentMethod method)
+
+    {
+
+        selectedPaymentMethod = method;
+
+        cardFiscalRetryOnly = false;
+        cardFiscalRetryRequiresRecovery = false;
+        if (method == PaymentMethod.Card)
+        {
+            await LoadCardPosSettingsAsync();
+            using var db = await DbFactory.CreateDbContextAsync();
+            var savedOrder = await db.Orders.FirstOrDefaultAsync(x => x.Id == order.Id);
+            if (savedOrder is not null && savedOrder.Status == OrderStatus.Open &&
+                savedOrder.PaymentMethod == PaymentMethod.Card &&
+                !string.IsNullOrWhiteSpace(savedOrder.CardTransactionId))
+            {
+                cardFiscalRetryOnly = true;
+                cardTransactionId = savedOrder.CardTransactionId.Trim();
+                pendingCardTerminalId = savedOrder.CardTerminalId ?? string.Empty;
+                pendingCardDocumentKind = savedOrder.DocumentKind is FiscalDocumentKind.Receipt or FiscalDocumentKind.Invoice
+                    ? savedOrder.DocumentKind.Value
+                    : FiscalDocumentKind.Receipt;
+
+                var isEdpsWebEcr = cardPosSettings.Any(x => x.Provider == "EDPS" &&
+                    x.Protocol.Contains("WebECR API v6") &&
+                    string.Equals(x.TerminalId?.Trim(), savedOrder.CardTerminalId?.Trim(), StringComparison.OrdinalIgnoreCase));
+                var expectedPaymentExternalSystemIdPrefix = $"payment-{savedOrder.Id}-";
+                cardFiscalRetryRequiresRecovery = isEdpsWebEcr && savedOrder.ParochosMark is null &&
+                    !string.IsNullOrWhiteSpace(savedOrder.ParochosPaymentUid) &&
+                    !(savedOrder.ParochosExternalId?.StartsWith(expectedPaymentExternalSystemIdPrefix, StringComparison.OrdinalIgnoreCase) ?? false);
+
+                fiscalError = cardFiscalRetryRequiresRecovery
+                    ? "Η παλιά προσπάθεια χρέωσε την κάρτα αλλά συνέδεσε την υπογραφή με διαφορετικό αναγνωριστικό παραστατικού. Δεν γίνεται ασφαλής επανέκδοση από εδώ. Μην ξαναστείλεις ποσό στο POS· χρειάζεται ανάκτηση από τα στοιχεία Parochos."
+                    : "Υπάρχει ήδη εγκεκριμένη συναλλαγή. Θα επαναληφθεί μόνο η έκδοση του ίδιου παραστατικού, χωρίς νέα χρέωση.";
+                closeStep = 2;
+                return;
+            }
+        }
+
+        closeStep = 9;
+
+    }
+
+
+
+    private List<OrderItem> BuildSelectedSplitItems() => splitPaymentItems
+
+        .Where(i => splitQuantities.TryGetValue(i.Id, out var q) && q > 0)
+
+        .Select(i => new OrderItem
+
+        {
+
+            Id = i.Id,
+
+            OrderId = i.OrderId,
+
+            MenuItemId = i.MenuItemId,
+
+            MenuItem = i.MenuItem,
+
+            Quantity = splitQuantities[i.Id],
+
+            ExtrasPrice = i.ExtrasPrice,
+
+            Notes = i.Notes,
+
+            IsCancelled = false
+
+        }).ToList();
+
+
+
+    private async Task IssueSelectedPayment(FiscalDocumentKind kind)
+
+    {
+
+        fiscalError = null;
+
+        splitDocumentKind = kind;
+
+        var selected = BuildSelectedSplitItems();
+
+        if (selected.Count == 0) { fiscalError = "Δεν επιλέχθηκαν είδη."; return; }
+
+
+
+        if (cardFiscalRetryOnly)
+        {
+            if (kind != pendingCardDocumentKind)
+            {
+                fiscalError = "Η ήδη εγκεκριμένη πληρωμή είναι συνδεδεμένη με συγκεκριμένο τύπο παραστατικού. Δεν ξεκίνησε νέα χρέωση.";
+                return;
+            }
+            await RetryApprovedCardFiscalDocument();
+            return;
+        }
+
+        if (kind == FiscalDocumentKind.Invoice)
+
+        {
+
+            closeStep = 3;
+
+            return;
+
+        }
+
+
+
+        if (selectedPaymentMethod == PaymentMethod.Card)
+
+        {
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+            var o = await db.Orders.Include(x => x.RestaurantTable).FirstOrDefaultAsync(x => x.Id == order.Id);
+
+            if (o is null) { fiscalError = "Η παραγγελία δεν βρέθηκε."; return; }
+
+            if (SelectedCardPosSetting is null) { fiscalError = "Επίλεξε ενεργό συνδεδεμένο POS."; return; }
+            var prep = await Fiscal.PrepareSelectedCardPaymentAsync(db, o, selected, kind, SelectedCardPosSetting);
+
+            if (!prep.Success) { fiscalError = prep.ErrorMessage; return; }
+
+            splitPendingCardPayment = prep;
+            edpsRetryWithFreshProviderData = false;
+            edpsStatusCheckRequired = false;
+
+            pendingCardAmount = prep.Amount;
+
+            pendingCardTerminalId = prep.TerminalId;
+
+            pendingCardDocumentKind = kind;
+
+            cardTransactionId = "";
+
+            closeStep = 10;
+
+            return;
+
+        }
+
+
+
+        await CompleteSplitPayment(null);
+
+    }
+
+
+
+    private async Task LoadCardPosSettingsAsync()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        cardPosSettings = await db.BankPosTerminalSettings
+            .Where(x => x.IsEnabled &&
+                (x.Provider.Contains("ePay") || x.Provider.Contains("Euronet") || x.Protocol.Contains("Common WebECR") ||
+                 (x.Provider == "EDPS" && x.Protocol.Contains("WebECR API v6")) ||
+                 (x.Provider == "Viva" && x.Protocol == "Viva Cloud")))
+            .OrderByDescending(x => x.UpdatedAt)
+            .ThenBy(x => x.Name)
+            .ToListAsync();
+        cardPosSettings = cardPosSettings.Where(x =>
+            CommonWebEcrProviderProfile.IsCommonRest(x)
+                ? MellonConnectionSettings.IsConnected(x)
+                : x.Provider.Contains("ePay", StringComparison.OrdinalIgnoreCase) ||
+                  x.Provider.Contains("Euronet", StringComparison.OrdinalIgnoreCase) ||
+                  (x.Provider == "EDPS" && x.Protocol.Contains("WebECR API v6")) ||
+                  (x.Provider == "Viva" && x.Protocol == "Viva Cloud" &&
+                   !string.IsNullOrWhiteSpace(x.TerminalId) && !string.IsNullOrWhiteSpace(x.ProviderCode) &&
+                   !string.IsNullOrWhiteSpace(x.ApiKey) && !string.IsNullOrWhiteSpace(x.ApiSecret) &&
+                   !string.IsNullOrWhiteSpace(x.ParochosNspCode))).ToList();
+        selectedCardPosSettingsId = cardPosSettings.FirstOrDefault()?.Id ?? 0;
+        CardPosChanged();
+        if (cardPosSettings.Count == 0)
+            fiscalError = "Δεν υπάρχει ενεργό συνδεδεμένο POS. Έλεγξε τις ρυθμίσεις στα Τραπεζικά POS.";
+    }
+
+    private async Task LoadEpayTerminals(bool isSplit)
+    {
+        if (epayBusy) return;
+        epayBusy = true;
+        fiscalError = null;
+        epayTerminals.Clear();
+        selectedEpayBackendId = "";
+        try
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+            var terminal = await db.BankPosTerminalSettings
+                .FirstOrDefaultAsync(x => x.Id == selectedCardPosSettingsId && x.IsEnabled &&
+                    (x.Provider.Contains("ePay") || x.Provider.Contains("Euronet") || x.Protocol.Contains("Common WebECR")));
+            if (terminal is null && selectedCardPosSettingsId == 0)
+                terminal = await db.BankPosTerminalSettings
+                    .Where(x => x.IsEnabled && (x.Provider.Contains("ePay") || x.Provider.Contains("Euronet") || x.Protocol.Contains("Common WebECR")))
+                    .OrderByDescending(x => x.UpdatedAt).FirstOrDefaultAsync();
+            if (terminal is null) { fiscalError = "Δεν υπάρχει ενεργή σύνδεση WebECR (ePay / Mellon) στις Ρυθμίσεις → Τραπεζικά POS."; return; }
+            selectedEpaySettingsId = terminal.Id;
+            selectedEpayProviderCode = terminal.ProviderCode ?? "";
+            var result = await Epay.GetTerminalsAsync(terminal);
+            if (!result.Success) { fiscalError = result.Message; return; }
+            epayTerminals = result.Terminals?.ToList() ?? new();
+            if (epayTerminals.Count == 0) fiscalError = "Το ePay δεν επέστρεψε διαθέσιμα POS. Έλεγξε την εξουσιοδότηση WebECR.";
+        }
+        catch (Exception ex) { fiscalError = "Σφάλμα αναζήτησης POS: " + ex.Message; }
+        finally { epayBusy = false; }
+    }
+
+    private async Task StartEpaySplitCardPayment()
+    {
+        if (epayBusy) return;
+        await StartSelectedEpayPayment(true);
+    }
+
+    private async Task StartEpayFullCardPayment()
+    {
+        if (epayBusy) return;
+        await StartSelectedEpayPayment(false);
+    }
+
+    private async Task StartSelectedEpayPayment(bool isSplit)
+    {
+        var isMellon = IsSelectedMellonWebEcr;
+        if (isMellon && !string.IsNullOrWhiteSpace(cardTransactionId))
+        {
+            if (isSplit) await CompleteSplitCardPayment(); else await CompleteCardPayment();
+            return;
+        }
+        if (!isMellon && string.IsNullOrWhiteSpace(selectedEpayBackendId)) { fiscalError = "Επίλεξε πρώτα διαθέσιμο POS."; return; }
+        epayBusy = true; fiscalError = null;
+        try
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+            var settingsId = isMellon ? selectedCardPosSettingsId : selectedEpaySettingsId;
+            var terminal = await db.BankPosTerminalSettings.FirstOrDefaultAsync(x => x.Id == settingsId && x.IsEnabled);
+            if (terminal is null) { fiscalError = "Η σύνδεση ePay δεν είναι πλέον ενεργή. Κάνε ξανά αναζήτηση POS."; return; }
+            if (isMellon && !MellonConnectionSettings.IsConnected(terminal))
+            { fiscalError = "Το επιλεγμένο Mellon POS δεν είναι πλέον συνδεδεμένο. Έλεγξε τις ρυθμίσεις του."; return; }
+            var reference = BuildEpayCustomerReference(order.Id);
+            ProviderPaymentData? providerData;
+            string? signedTerminalId;
+            CardPaymentPreparation? cardPreparation = null;
+            if (isSplit)
+            {
+                providerData = splitPendingCardPayment?.ProviderData;
+                signedTerminalId = splitPendingCardPayment?.TerminalId;
+            }
+            else
+            {
+                // Full-payment signature must be generated for the full order amount immediately before txninit.
+                var currentOrderForSignature = await db.Orders
+                    .Include(x => x.Items).ThenInclude(i => i.MenuItem).ThenInclude(m => m!.MenuCategory)
+                    .FirstOrDefaultAsync(x => x.Id == order.Id);
+                if (currentOrderForSignature is null) { fiscalError = "Η παραγγελία δεν βρέθηκε για υπογραφή πληρωμής."; return; }
+                var prep = await Fiscal.PrepareCardPaymentAsync(db, currentOrderForSignature, isMellon ? pendingCardDocumentKind : FiscalDocumentKind.Receipt, terminal);
+                if (!prep.Success) { fiscalError = prep.ErrorMessage ?? "Αποτυχία προετοιμασίας υπογραφής παρόχου."; return; }
+                cardPreparation = prep;
+                providerData = prep.ProviderData;
+                signedTerminalId = prep.TerminalId;
+            }
+            if (providerData is null) { fiscalError = "Δεν δημιουργήθηκαν ProviderData από τον πάροχο. Δεν ξεκίνησε χρέωση."; return; }
+            if (isMellon && isSplit && (!string.Equals(splitPendingCardPayment?.NspCode, terminal.ParochosNspCode.Trim(), StringComparison.Ordinal) ||
+                providerData.ProviderId != terminal.ProviderId))
+            { fiscalError = "Άλλαξαν οι ρυθμίσεις υπογραφής του Mellon POS. Επίλεξε ξανά POS και παραστατικό πριν τη χρέωση."; return; }
+            var selectedEpayTerminal = isMellon
+                ? new EpayWebEcrService.TerminalChoice(terminal.IdUrl, terminal.TerminalId, terminal.MerchantId, terminal.ProviderCode)
+                : epayTerminals.FirstOrDefault(x => x.BackendId == selectedEpayBackendId);
+            if (selectedEpayTerminal is null) { fiscalError = "Selected WebECR POS was not found. No charge was started."; return; }
+            if (!string.Equals(signedTerminalId?.Trim(), selectedEpayTerminal.TerminalId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                fiscalError = $"Parochos signature TID ({signedTerminalId ?? "<missing>"}) does not match selected ePay POS TID ({selectedEpayTerminal.TerminalId}). No charge was started.";
+                return;
+            }
+            var result = isMellon
+                ? await ChargeMellonAsync(terminal, pendingCardAmount, reference, providerData)
+                : await Epay.ChargeAsync(terminal, pendingCardAmount, reference, default, selectedEpayBackendId, providerData);
+            if (!result.Success) { fiscalError = result.Message; return; }
+            cardTransactionId = result.TransactionId;
+            pendingCardTerminalId = selectedEpayTerminal.TerminalId;
+            if (!isSplit)
+            {
+                var currentOrder = await db.Orders.FirstOrDefaultAsync(x => x.Id == order.Id);
+                if (currentOrder is not null)
+                {
+                    currentOrder.CardTransactionId = result.TransactionId;
+                    currentOrder.CardTerminalId = pendingCardTerminalId;
+                    // Store the Parochos/AADE NSP code, not ePay WebECR ProviderId.
+                    currentOrder.CardNspCode = cardPreparation?.NspCode ?? "2";
+                    if (cardPreparation is not null)
+                    {
+                        currentOrder.ParochosExternalId = cardPreparation.ExternalSystemId;
+                        currentOrder.InvoiceSeriesName = cardPreparation.SeriesName;
+                        currentOrder.InvoiceNumber = cardPreparation.InvoiceNumber;
+                        currentOrder.DocumentKind = isMellon ? pendingCardDocumentKind : FiscalDocumentKind.Receipt;
+                        currentOrder.ParochosPaymentSignature = cardPreparation.Signature;
+                        currentOrder.ParochosPaymentUid = cardPreparation.Uid;
+                    }
+                    await db.SaveChangesAsync();
+                }
+            }
+            if (isSplit) await CompleteSplitCardPayment(); else await CompleteCardPayment();
+        }
+        finally { epayBusy = false; }
+    }
+
+    private async Task<EpayWebEcrService.PaymentResult> ChargeMellonAsync(
+        BankPosTerminalSettings terminal, decimal amount, string reference, ProviderPaymentData providerData)
+    {
+        var result = await Mellon.ChargeAsync(terminal, amount, reference, providerData: providerData);
+        return new(result.Success, result.TransactionId, result.Message, result.IntentId);
+    }
+
+    private static string BuildEpayCustomerReference(int orderId)
+    {
+        var athensTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
+            OperatingSystem.IsWindows() ? "GTB Standard Time" : "Europe/Athens");
+        var localTimestamp = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, athensTimeZone)
+            .ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        var orderReference = orderId.ToString("D10", System.Globalization.CultureInfo.InvariantCulture);
+        var randomSuffix = System.Security.Cryptography.RandomNumberGenerator
+            .GetInt32(0, 1_000_000_000)
+            .ToString("D9", System.Globalization.CultureInfo.InvariantCulture);
+        return orderReference + localTimestamp + randomSuffix;
+    }
+
+    private async Task StartEdpsSplitCardPayment()
+    {
+        if (epayBusy) return;
+        await StartSelectedEdpsPayment(true);
+    }
+
+    private async Task StartEdpsFullCardPayment()
+    {
+        if (epayBusy) return;
+        await StartSelectedEdpsPayment(false);
+    }
+
+    private async Task StartSelectedVivaPayment(bool isSplit)
+    {
+        if (epayBusy) return;
+        if (!string.IsNullOrWhiteSpace(cardTransactionId))
+        {
+            // A successful card payment followed by a fiscal failure is a fiscal retry only.
+            epayBusy = true;
+            try { if (isSplit) await CompleteSplitCardPayment(); else await CompleteCardPayment(); }
+            finally { epayBusy = false; }
+            return;
+        }
+        var retryAfterManualStatusCheck = vivaStatusCheckRequired;
+        if (retryAfterManualStatusCheck)
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm",
+                "Η προηγούμενη προσπάθεια Viva δεν επιβεβαιώθηκε. Έλεγξε πρώτα το ιστορικό συναλλαγών της Viva και το POS. Αν υπάρχει χρέωση, πάτησε Άκυρο. Μόνο αν επιβεβαίωσες ότι δεν χρεώθηκε, πάτησε OK για νέα προσπάθεια με νέα υπογραφή Parochos.");
+            if (!confirmed) return;
+            vivaStatusCheckRequired = false;
+        }
+        epayBusy = true;
+        fiscalError = null;
+        var requestMayHaveStarted = false;
+        try
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+            var terminal = await db.BankPosTerminalSettings.FirstOrDefaultAsync(x =>
+                x.Id == selectedCardPosSettingsId && x.IsEnabled && x.Provider == "Viva" && x.Protocol == "Viva Cloud");
+            if (terminal is null) { fiscalError = "Η σύνδεση Viva δεν είναι πλέον ενεργή. Επίλεξε ξανά το POS."; return; }
+
+            var preparation = isSplit ? splitPendingCardPayment : pendingCardPayment;
+            if (retryAfterManualStatusCheck || preparation is null || !preparation.Success || preparation.ProviderData is null)
+            {
+                if (isSplit)
+                {
+                    var currentOrder = await db.Orders.Include(x => x.RestaurantTable).FirstOrDefaultAsync(x => x.Id == order.Id);
+                    if (currentOrder is null) { fiscalError = "Η παραγγελία δεν βρέθηκε."; return; }
+                    preparation = await Fiscal.PrepareSelectedCardPaymentAsync(db, currentOrder, BuildSelectedSplitItems(), pendingCardDocumentKind, terminal);
+                    splitPendingCardPayment = preparation;
+                }
+                else
+                {
+                    var currentOrder = await db.Orders.Include(x => x.Items).ThenInclude(i => i.MenuItem).ThenInclude(m => m!.MenuCategory)
+                        .FirstOrDefaultAsync(x => x.Id == order.Id);
+                    if (currentOrder is null) { fiscalError = "Η παραγγελία δεν βρέθηκε."; return; }
+                    preparation = await Fiscal.PrepareCardPaymentAsync(db, currentOrder, pendingCardDocumentKind, terminal);
+                    pendingCardPayment = preparation;
+                }
+            }
+            if (preparation is null || !preparation.Success || preparation.ProviderData is null)
+            { fiscalError = preparation?.ErrorMessage ?? "Δεν δημιουργήθηκε έγκυρη υπογραφή Parochos. Δεν ξεκίνησε χρέωση."; return; }
+            if (!string.Equals(preparation.TerminalId.Trim(), terminal.TerminalId.Trim(), StringComparison.OrdinalIgnoreCase))
+            { fiscalError = "Το Terminal ID της υπογραφής Parochos δεν ταιριάζει με το επιλεγμένο Viva POS. Δεν ξεκίνησε χρέωση."; return; }
+            var expectedCents = decimal.ToInt64(decimal.Round(pendingCardAmount * 100m, 0, MidpointRounding.AwayFromZero));
+            var signedCents = decimal.ToInt64(decimal.Round(preparation.Amount * 100m, 0, MidpointRounding.AwayFromZero));
+            if (expectedCents != signedCents)
+            { pendingCardAmount = preparation.Amount; fiscalError = "Το ποσό της υπογραφής Parochos διαφέρει από το ποσό πληρωμής. Ελέγξτε το νέο ποσό και ξεκινήστε ξανά."; return; }
+
+            requestMayHaveStarted = true;
+            var reference = $"RO-{order.Id}-{(isSplit ? "SPLIT-" : "")}{Guid.NewGuid():N}";
+            var result = await Viva.ChargeAsync(terminal, preparation.Amount, reference, preparation.ProviderData);
+            vivaPendingSessionId = result.SessionId;
+            if (!result.Success)
+            {
+                fiscalError = result.Message;
+                vivaStatusCheckRequired = result.RequiresStatusCheck;
+                return;
+            }
+
+            cardTransactionId = result.TransactionId ?? "";
+            pendingCardTerminalId = terminal.TerminalId.Trim();
+            if (!isSplit)
+            {
+                var currentOrder = await db.Orders.FirstOrDefaultAsync(x => x.Id == order.Id);
+                if (currentOrder is not null)
+                {
+                    currentOrder.CardTransactionId = result.TransactionId;
+                    currentOrder.CardTerminalId = pendingCardTerminalId;
+                    currentOrder.CardNspCode = preparation.NspCode;
+                    currentOrder.ParochosExternalId = preparation.ExternalSystemId;
+                    currentOrder.InvoiceSeriesName = preparation.SeriesName;
+                    currentOrder.InvoiceNumber = preparation.InvoiceNumber;
+                    currentOrder.DocumentKind = pendingCardDocumentKind;
+                    currentOrder.ParochosPaymentSignature = preparation.Signature;
+                    currentOrder.ParochosPaymentUid = preparation.Uid;
+                    await db.SaveChangesAsync();
+                }
+            }
+            vivaStatusCheckRequired = false;
+            if (isSplit) await CompleteSplitCardPayment(); else await CompleteCardPayment();
+        }
+        catch (Exception ex)
+        {
+            if (requestMayHaveStarted)
+            {
+                vivaStatusCheckRequired = true;
+                fiscalError = "Δεν επιβεβαιώθηκε το αποτέλεσμα από τη Viva. Έλεγξε το ιστορικό POS πριν από οποιαδήποτε νέα προσπάθεια. " + ex.Message;
+            }
+            else fiscalError = "Σφάλμα προετοιμασίας Viva. Δεν ξεκίνησε χρέωση. " + ex.Message;
+        }
+        finally { epayBusy = false; }
+    }
+
+    private async Task StartSelectedEdpsPayment(bool isSplit)
+    {
+        if (epayBusy) return;
+        if (edpsStatusCheckRequired)
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm",
+                "Η κατάσταση της προηγούμενης προσπάθειας δεν επιβεβαιώθηκε από το EDPS. Έλεγξε το ιστορικό του POS. Αν επιβεβαίωσες ότι απορρίφθηκε και δεν χρεώθηκε, πάτησε OK για να δημιουργηθεί νέα υπογραφή Parochos και να σταλεί αμέσως νέα προσπάθεια. Αν εγκρίθηκε, πάτησε Άκυρο.");
+            if (!confirmed) return;
+            edpsStatusCheckRequired = false;
+            edpsRetryWithFreshProviderData = true;
+        }
+        epayBusy = true;
+        fiscalError = null;
+        var txnInitMayHaveStarted = false;
+        try
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+            var terminal = await db.BankPosTerminalSettings.FirstOrDefaultAsync(
+                x => x.Id == selectedCardPosSettingsId && x.IsEnabled && x.Provider == "EDPS" && x.Protocol.Contains("WebECR API v6"));
+            if (terminal is null)
+            {
+                fiscalError = "Η σύνδεση EDPS δεν είναι πλέον ενεργή. Επίλεξε ξανά τερματικό κάρτας.";
+                return;
+            }
+
+            var preparation = isSplit ? splitPendingCardPayment : pendingCardPayment;
+            if (edpsRetryWithFreshProviderData)
+            {
+                if (isSplit)
+                {
+                    var currentOrder = await db.Orders.Include(x => x.RestaurantTable)
+                        .FirstOrDefaultAsync(x => x.Id == order.Id);
+                    if (currentOrder is null)
+                    {
+                        fiscalError = "Η παραγγελία δεν βρέθηκε. Δεν ξεκίνησε χρέωση.";
+                        return;
+                    }
+                    var selected = BuildSelectedSplitItems();
+                    preparation = await Fiscal.PrepareSelectedCardPaymentAsync(
+                        db, currentOrder, selected, pendingCardDocumentKind, terminal);
+                }
+                else
+                {
+                    var currentOrder = await db.Orders
+                        .Include(x => x.Items).ThenInclude(i => i.MenuItem).ThenInclude(m => m!.MenuCategory)
+                        .FirstOrDefaultAsync(x => x.Id == order.Id);
+                    if (currentOrder is null)
+                    {
+                        fiscalError = "Η παραγγελία δεν βρέθηκε. Δεν ξεκίνησε χρέωση.";
+                        return;
+                    }
+                    preparation = await Fiscal.PrepareCardPaymentAsync(
+                        db, currentOrder, pendingCardDocumentKind, terminal);
+                }
+
+                if (!preparation.Success || preparation.ProviderData is null)
+                {
+                    fiscalError = preparation.ErrorMessage ?? "Ο Parochos δεν επέστρεψε νέα υπογραφή. Δεν ξεκίνησε χρέωση.";
+                    return;
+                }
+                var previousAmountCents = decimal.ToInt32(decimal.Round(pendingCardAmount * 100m, 0, MidpointRounding.AwayFromZero));
+                var newAmountCents = decimal.ToInt32(decimal.Round(preparation.Amount * 100m, 0, MidpointRounding.AwayFromZero));
+                if (!string.Equals(preparation.TerminalId.Trim(), terminal.TerminalId.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    fiscalError = "Το TID της νέας υπογραφής Parochos δεν ταιριάζει με το επιλεγμένο EDPS POS. Δεν ξεκίνησε χρέωση.";
+                    return;
+                }
+
+                if (isSplit)
+                    splitPendingCardPayment = preparation;
+                else
+                    pendingCardPayment = preparation;
+                pendingCardTerminalId = preparation.TerminalId;
+                if (previousAmountCents != newAmountCents)
+                {
+                    pendingCardAmount = preparation.Amount;
+                    edpsRetryWithFreshProviderData = false;
+                    fiscalError = "Το ποσό άλλαξε. Εμφανίζεται το νέο σύνολο με νέα υπογραφή Parochos· έλεγξέ το και πάτησε ξανά αποστολή. Δεν ξεκίνησε χρέωση.";
+                    return;
+                }
+
+                edpsRetryWithFreshProviderData = false;
+            }
+
+            var providerData = preparation?.ProviderData;
+            if (preparation is null || !preparation.Success || providerData is null)
+            {
+                fiscalError = "Δεν υπάρχουν έγκυρα ProviderData Parochos για το EDPS. Δεν ξεκίνησε χρέωση.";
+                return;
+            }
+            if (!string.Equals(preparation.TerminalId.Trim(), terminal.TerminalId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                fiscalError = $"Το TID της υπογραφής Parochos ({preparation.TerminalId}) δεν ταιριάζει με το επιλεγμένο EDPS POS ({terminal.TerminalId}). Δεν ξεκίνησε χρέωση.";
+                return;
+            }
+
+            var reference = isSplit
+                ? $"RO-SPLIT-{order.Id}-{Guid.NewGuid():N}"
+                : $"RO-{order.Id}-{Guid.NewGuid():N}";
+            txnInitMayHaveStarted = true;
+            var result = await Edps.ChargeAsync(terminal, preparation.Amount, reference, providerData);
+            if (!result.Success)
+            {
+                fiscalError = result.Message;
+                edpsRetryWithFreshProviderData = result.RetryRequiresFreshProviderData;
+                edpsStatusCheckRequired = result.RequiresStatusCheck;
+                return;
+            }
+
+            edpsRetryWithFreshProviderData = false;
+            edpsStatusCheckRequired = false;
+            cardTransactionId = result.TransactionId;
+            pendingCardTerminalId = terminal.TerminalId.Trim();
+            if (!isSplit)
+            {
+                var currentOrder = await db.Orders.FirstOrDefaultAsync(x => x.Id == order.Id);
+                if (currentOrder is not null)
+                {
+                    currentOrder.CardTransactionId = result.TransactionId;
+                    currentOrder.CardTerminalId = pendingCardTerminalId;
+                    currentOrder.CardNspCode = preparation.NspCode;
+                    currentOrder.ParochosExternalId = preparation.ExternalSystemId;
+                    currentOrder.InvoiceSeriesName = preparation.SeriesName;
+                    currentOrder.InvoiceNumber = preparation.InvoiceNumber;
+                    currentOrder.DocumentKind = pendingCardDocumentKind;
+                    currentOrder.ParochosPaymentSignature = preparation.Signature;
+                    currentOrder.ParochosPaymentUid = preparation.Uid;
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            if (isSplit) await CompleteSplitCardPayment(); else await CompleteCardPayment();
+        }
+        catch (Exception)
+        {
+            if (txnInitMayHaveStarted)
+            {
+                edpsStatusCheckRequired = true;
+                fiscalError = "Δεν επιβεβαιώθηκε η απάντηση του EDPS. Έλεγξε το ιστορικό του POS πριν από νέα προσπάθεια.";
+            }
+            else
+            {
+                fiscalError = "Σφάλμα προετοιμασίας της συναλλαγής EDPS. Δεν ξεκίνησε χρέωση.";
+            }
+        }
+        finally
+        {
+            epayBusy = false;
+        }
+    }
+
+    private async Task CompleteSplitCardPayment()
+
+    {
+
+        if (string.IsNullOrWhiteSpace(cardTransactionId))
+
+        {
+
+            fiscalError = "Συμπλήρωσε το Transaction ID από το EFT-POS.";
+
+            return;
+
+        }
+
+        await CompleteSplitPayment(cardTransactionId.Trim());
+
+    }
+
+
+
+    private async Task CompleteSplitPayment(string? transactionId)
+
+    {
+
+        closeStep = 4;
+
+        fiscalError = null;
+
+        try
+
+        {
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+            var o = await db.Orders.Include(x => x.RestaurantTable).FirstOrDefaultAsync(x => x.Id == order.Id);
+
+            if (o is null) { fiscalError = "Η παραγγελία δεν βρέθηκε."; closeStep = 7; return; }
+
+            var selected = BuildSelectedSplitItems();
+
+            var result = await Fiscal.IssueSelectedItemsPaymentAsync(
+
+                db, o, selected, selectedPaymentMethod, splitDocumentKind, transactionId,
+
+                splitPendingCardPayment?.Signature, pendingCardTerminalId,
+                splitPendingCardPayment?.NspCode ?? (IsSelectedEdpsWebEcr ? "5" : "2"),
+                splitPendingCardPayment?.ExternalSystemId,
+                splitPendingCardPayment?.SeriesName,
+                splitPendingCardPayment?.InvoiceNumber);
+
+            if (!result.Success)
+
+            {
+
+                fiscalError = "Απέτυχε η έκδοση: " + result.ErrorMessage;
+
+                closeStep = selectedPaymentMethod == PaymentMethod.Card ? 10 : 9;
+
+                return;
+
+            }
+
+
+
+            var activeItems = await db.OrderItems.Where(i => i.OrderId == o.Id && !i.IsCancelled)
+                .Select(i => new { i.Id, i.Quantity }).ToListAsync();
+            var paidQuantities = await db.OrderPaymentItems
+                .Where(pi => pi.OrderPayment != null && pi.OrderPayment.OrderId == o.Id && pi.OrderPayment.FiscalStatus == FiscalStatus.Issued)
+                .GroupBy(pi => pi.OrderItemId).Select(g => new { OrderItemId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+                .ToDictionaryAsync(x => x.OrderItemId, x => x.Quantity);
+            var hasRemaining = activeItems.Any(i => (paidQuantities.TryGetValue(i.Id, out var q) ? q : 0) < i.Quantity);
+            if (!hasRemaining)
+            {
+                o.Status = OrderStatus.Closed;
+                o.ClosedAt = DateTime.Now;
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                await LoadAsync();
+            }
+
+
+
+            lastDocumentLabel = splitDocumentKind == FiscalDocumentKind.Invoice ? "Τιμολόγιο" : "Απόδειξη";
+
+            lastSeriesAndNumber = "Split payment";
+
+            lastMark = result.Mark;
+
+            lastPdfUrl = null;
+
+            closeStep = 5;
+
+        }
+
+        catch (Exception ex)
+
+        {
+
+            fiscalError = "Απρόσμενο σφάλμα: " + ex.Message;
+
+            closeStep = 9;
+
+        }
+
+    }
+
+
+
+    private async Task SelectPayment(PaymentMethod method)
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        isSplitPaymentFlow = false;
+
+        selectedPaymentMethod = method;
+
+        if (method == PaymentMethod.Card) await LoadCardPosSettingsAsync();
+
+
+
+
+
+
+
+        closeStep = 2;
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task RetryApprovedCardFiscalDocument()
+    {
+        if (!cardFiscalRetryOnly || cardFiscalRetryRequiresRecovery) return;
+        if (string.IsNullOrWhiteSpace(cardTransactionId))
+        {
+            fiscalError = "Δεν βρέθηκε το ήδη εγκεκριμένο Transaction ID. Δεν στάλθηκε νέα χρέωση.";
+            return;
+        }
+
+        await IssueAndClose(pendingCardDocumentKind, cardPaymentReady: true);
+    }
+
+    private async Task SelectDocumentKind(FiscalDocumentKind kind)
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        if (kind == FiscalDocumentKind.Invoice)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            closeStep = 3;
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        await IssueAndClose(FiscalDocumentKind.Receipt);
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private void OnCounterpartVatInput(ChangeEventArgs e)
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        counterpartVat = new string((e.Value?.ToString() ?? "")
+
+
+
+
+
+
+
+            .Where(char.IsDigit)
+
+
+
+
+
+
+
+            .Take(9)
+
+
+
+
+
+
+
+            .ToArray());
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        aadeLookupError = null;
+
+
+
+
+
+
+
+        aadeCustomerFound = false;
+
+
+
+
+
+
+
+        counterpartDoy = "";
+
+
+
+
+
+
+
+        counterpartMainActivity = "";
+
+
+
+
+
+
+
+        counterpartLegalStatus = "";
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task LookupCustomerByVatAsync()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        var vat = NormalizedCounterpartVat;
+
+
+
+
+
+
+
+        if (vat.Length != 9)
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        aadeLookupInProgress = true;
+
+
+
+
+
+
+
+        aadeLookupError = null;
+
+
+
+
+
+
+
+        aadeCustomerFound = false;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        try
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+            var settings = await db.CompanySettings.FirstOrDefaultAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var result = await AadeRegistry.LookupAsync(vat);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (!result.Success || result.Customer is null)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                aadeLookupError = result.ErrorMessage ?? "Δεν βρέθηκαν στοιχεία για το συγκεκριμένο ΑΦΜ.";
+
+
+
+
+
+
+
+                return;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var customer = result.Customer;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            counterpartVat = customer.VatNumber;
+
+
+
+
+
+
+
+            counterpartName = customer.Name;
+
+
+
+
+
+
+
+            counterpartStreet = customer.Address;
+
+
+
+
+
+
+
+            counterpartCity = customer.City;
+
+
+
+
+
+
+
+            counterpartPostalCode = customer.PostalCode;
+
+
+
+
+
+
+
+            counterpartDoy = string.Join(" - ", new[] { customer.DoyCode, customer.DoyDescription }
+
+
+
+
+
+
+
+                .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+
+
+
+
+
+
+            counterpartMainActivity = customer.MainActivity;
+
+
+
+
+
+
+
+            counterpartLegalStatus = customer.LegalStatus;
+
+
+
+
+
+
+
+            aadeCustomerFound = true;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        catch (Exception ex)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            aadeLookupError = "Σφάλμα κατά την αναζήτηση του ΑΦΜ: " + ex.Message;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        finally
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            aadeLookupInProgress = false;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task ConfirmClose()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        fiscalError = null;
+
+
+
+
+
+
+
+        if (string.IsNullOrWhiteSpace(counterpartVat) || string.IsNullOrWhiteSpace(counterpartName))
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            fiscalError = "Το ΑΦΜ και η επωνυμία του πελάτη είναι υποχρεωτικά για τιμολόγιο.";
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+        }
+
+        if (isSplitPaymentFlow)
+
+        {
+
+            splitDocumentKind = FiscalDocumentKind.Invoice;
+
+            var selected = BuildSelectedSplitItems();
+
+            if (selected.Count == 0)
+
+            {
+
+                fiscalError = "Δεν επιλέχθηκαν είδη.";
+
+                return;
+
+            }
+
+            if (selectedPaymentMethod == PaymentMethod.Card)
+
+            {
+
+                using var db = await DbFactory.CreateDbContextAsync();
+
+                var o = await db.Orders.Include(x => x.RestaurantTable).FirstOrDefaultAsync(x => x.Id == order.Id);
+
+                if (o is null) { fiscalError = "Η παραγγελία δεν βρέθηκε."; return; }
+
+                if (SelectedCardPosSetting is null) { fiscalError = "Επίλεξε ενεργό συνδεδεμένο POS."; return; }
+            var prep = await Fiscal.PrepareSelectedCardPaymentAsync(db, o, selected, FiscalDocumentKind.Invoice, SelectedCardPosSetting);
+
+                if (!prep.Success) { fiscalError = prep.ErrorMessage; return; }
+
+                splitPendingCardPayment = prep;
+                edpsRetryWithFreshProviderData = false;
+                edpsStatusCheckRequired = false;
+
+                pendingCardAmount = prep.Amount;
+
+                pendingCardTerminalId = prep.TerminalId;
+
+                pendingCardDocumentKind = FiscalDocumentKind.Invoice;
+
+                cardTransactionId = "";
+
+                closeStep = 10;
+
+                return;
+
+            }
+
+            await CompleteSplitPayment(null);
+
+            return;
+
+        }
+
+
+
+        await IssueAndClose(FiscalDocumentKind.Invoice);
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task CompleteCardPayment()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        if (string.IsNullOrWhiteSpace(cardTransactionId))
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            fiscalError = "Συμπλήρωσε το Transaction ID που επέστρεψε το EFT-POS.";
+
+
+
+
+
+
+
+            return;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        await IssueAndClose(pendingCardDocumentKind, true);
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private async Task IssueAndClose(FiscalDocumentKind kind, bool cardPaymentReady = false)
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        closeStep = 4;
+
+
+
+
+
+
+
+        fiscalError = null;
+
+
+
+
+
+
+
+        StateHasChanged();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        try
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            using var db = await DbFactory.CreateDbContextAsync();
+
+
+
+
+
+
+
+            var o = await db.Orders
+
+
+
+
+
+
+
+    .Include(x => x.RestaurantTable)
+
+
+
+
+
+
+
+    .Include(x => x.Items)
+
+
+
+
+
+
+
+        .ThenInclude(i => i.MenuItem)
+
+
+
+
+
+
+
+            .ThenInclude(mi => mi!.MenuCategory)
+
+
+
+
+
+
+
+                .ThenInclude(c => c!.PrinterStations)
+
+
+
+
+
+
+
+    .FirstOrDefaultAsync(x => x.Id == order.Id);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (o is null)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                fiscalError = "Η παραγγελία δεν βρέθηκε.";
+
+
+
+
+
+
+
+                closeStep = 2;
+
+
+
+
+
+
+
+                return;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            o.PaymentMethod = selectedPaymentMethod;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (kind == FiscalDocumentKind.Invoice)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                o.CounterpartVatNumber = counterpartVat.Trim();
+
+
+
+
+
+
+
+                o.CounterpartName = counterpartName.Trim();
+
+
+
+
+
+
+
+                o.CounterpartStreet = counterpartStreet.Trim();
+
+
+
+
+
+
+
+                o.CounterpartCity = counterpartCity.Trim();
+
+
+
+
+
+
+
+                o.CounterpartPostalCode = counterpartPostalCode.Trim();
+
+
+
+
+
+
+
+                o.CounterpartStreetNumber = "";
+
+
+
+
+
+
+
+                o.CounterpartTaxOffice = counterpartDoy.Trim();
+
+
+
+
+
+
+
+                o.CounterpartMainActivity = counterpartMainActivity.Trim();
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // EFT-POS flow: requestPayment must happen before /api/send. The Parochos API
+
+
+
+
+
+
+
+            // returns the provider signature; the actual POS transaction is performed by
+
+
+
+
+
+
+
+            // the terminal/POS integration and returns a transaction id.
+
+
+
+
+
+
+
+            if (o.PaymentMethod == PaymentMethod.Card && !cardPaymentReady &&
+                !string.IsNullOrWhiteSpace(o.CardTransactionId))
+            {
+                if (kind != o.DocumentKind)
+                {
+                    fiscalError = "Υπάρχει ήδη εγκεκριμένη πληρωμή για διαφορετικό τύπο παραστατικού. Δεν ξεκίνησε νέα χρέωση.";
+                    closeStep = 2;
+                    return;
+                }
+
+                cardTransactionId = o.CardTransactionId.Trim();
+                cardPaymentReady = true;
+            }
+
+            if (cardPaymentReady && o.PaymentMethod == PaymentMethod.Card &&
+                !string.IsNullOrWhiteSpace(o.ParochosPaymentUid))
+            {
+                var isEdpsWebEcrPayment = await db.BankPosTerminalSettings.AnyAsync(x =>
+                    x.Provider == "EDPS" && x.Protocol.Contains("WebECR API v6") &&
+                    x.TerminalId == o.CardTerminalId);
+                var expectedPaymentExternalSystemIdPrefix = $"payment-{o.Id}-";
+                if (isEdpsWebEcrPayment && o.ParochosMark is null &&
+                    !(o.ParochosExternalId?.StartsWith(expectedPaymentExternalSystemIdPrefix, StringComparison.OrdinalIgnoreCase) ?? false))
+                {
+                    cardFiscalRetryOnly = true;
+                    cardFiscalRetryRequiresRecovery = true;
+                    fiscalError = "Η συναλλαγή POS έχει ήδη εγκριθεί, αλλά η παλιά έκδοση συνέδεσε την υπογραφή Parochos με διαφορετικό αναγνωριστικό παραστατικού. Δεν έγινε νέα χρέωση. Χρειάζεται ανάκτηση της αρχικής υπογραφής από τα στοιχεία Parochos.";
+                    closeStep = 2;
+                    return;
+                }
+            }
+
+            if (o.PaymentMethod == PaymentMethod.Card && !cardPaymentReady)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                if (SelectedCardPosSetting is null) { fiscalError = "Επίλεξε ενεργό συνδεδεμένο POS."; return; }
+            var preparation = await Fiscal.PrepareCardPaymentAsync(db, o, kind, SelectedCardPosSetting);
+
+
+
+
+
+
+
+                if (!preparation.Success)
+
+
+
+
+
+
+
+                {
+
+
+
+
+
+
+
+                    fiscalError = preparation.ErrorMessage;
+
+
+
+
+
+
+
+                    closeStep = 2;
+
+
+
+
+
+
+
+                    return;
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                pendingCardPayment = preparation;
+                edpsRetryWithFreshProviderData = false;
+                edpsStatusCheckRequired = false;
+
+
+
+
+
+
+
+                pendingCardDocumentKind = kind;
+
+
+
+
+
+
+
+                pendingCardTerminalId = preparation.TerminalId;
+
+
+
+
+
+
+
+                pendingCardAmount = preparation.Amount;
+
+
+
+
+
+
+
+                cardTransactionId = "";
+
+
+
+
+
+
+
+                await db.SaveChangesAsync();
+
+
+
+
+
+
+
+                closeStep = 6;
+
+
+
+
+
+
+
+                return;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (o.PaymentMethod == PaymentMethod.Card)
+
+
+
+
+
+
+
+                o.CardTransactionId = cardTransactionId.Trim();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            var result = await Fiscal.IssueAsync(db, o, kind, o.PaymentMethod == PaymentMethod.Card ? cardTransactionId : null);
+
+
+
+
+
+
+
+            await db.SaveChangesAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (!result.Success)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                if (o.PaymentMethod == PaymentMethod.Card && cardPaymentReady &&
+                    !string.IsNullOrWhiteSpace(o.CardTransactionId))
+                {
+                    cardFiscalRetryOnly = true;
+                    cardFiscalRetryRequiresRecovery = result.RequiresRecovery;
+                    pendingCardDocumentKind = kind;
+                }
+
+                fiscalError = result.RequiresRecovery
+                    ? result.ErrorMessage
+                    : $"Απέτυχε η έκδοση παραστατικού: {result.ErrorMessage} — Το τραπέζι ΔΕΝ έκλεισε, δοκίμασε ξανά.";
+
+
+
+
+
+
+
+                closeStep = 2;
+
+
+
+
+
+
+
+                return;
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            o.Status = OrderStatus.Closed;
+
+
+
+
+
+
+
+            o.ClosedAt = DateTime.Now;
+
+
+
+
+
+
+
+            await db.SaveChangesAsync();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // Τύπωσε το τελικό φορολογικό παραστατικό με MARK και πραγματικό QR ESC/POS.
+
+
+
+
+
+
+
+            // Δεν βάζουμε MARK μέσα στις γραμμές των προϊόντων.
+
+
+
+
+
+
+
+            try
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                var fiscalItems = o.Items.Where(oi => !oi.IsCancelled).Select(oi => (
+
+
+
+
+
+
+
+                    ItemName: oi.MenuItem!.Name,
+
+
+
+
+
+
+
+                    Quantity: oi.Quantity,
+
+
+
+
+
+
+
+                    LineTotal: oi.Quantity * ((oi.MenuItem?.Price ?? 0) + oi.ExtrasPrice),
+
+
+
+
+
+
+
+                    VatPercent: oi.MenuItem?.VatPercentOverride ?? oi.MenuItem?.MenuCategory?.VatPercent ?? 24m)).ToList();
+
+
+
+
+
+
+
+                var fiscalTotal = fiscalItems.Sum(i => i.LineTotal);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                var stations = o.Items.Where(oi => !oi.IsCancelled)
+                    .SelectMany(oi => GetCategoryPrinters(oi.MenuItem?.MenuCategory))
+                    .DistinctBy(s => s.Id)
+                    .ToList();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                var waiterUser = await db.Users.FindAsync(currentUserId);
+
+
+
+
+
+
+
+                foreach (var station in stations)
+
+
+
+
+
+
+
+                {
+
+
+
+
+
+
+
+                    var printed = await Printer.PrintFiscalReceiptAsync(
+
+
+
+
+
+
+
+                        station,
+
+
+
+
+
+
+
+                        tableName,
+
+
+
+
+
+
+
+                        waiterUser?.FullName ?? "-",
+
+
+
+
+
+
+
+                        kind == FiscalDocumentKind.Invoice ? "ΤΙΜΟΛΟΓΙΟ" : "ΑΠΟΔΕΙΞΗ ΛΙΑΝΙΚΗΣ",
+
+
+
+
+
+
+
+                        o.InvoiceSeriesName ?? "",
+
+
+
+
+
+
+
+                        o.InvoiceNumber ?? 0,
+
+
+
+
+
+
+
+                        o.ParochosMark,
+
+
+
+
+
+
+
+                        o.ParochosQrCode,
+
+
+
+
+
+
+
+                        fiscalItems,
+
+
+
+
+
+
+
+                        fiscalTotal,
+
+
+
+
+
+
+
+                        companySettings,
+
+
+
+
+
+
+
+                        kind == FiscalDocumentKind.Invoice ? o : null);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    if (!printed)
+
+
+
+
+
+
+
+                        Console.WriteLine($"⚠ Fiscal receipt printer failed: {station.Name} ({station.IpAddress}:{station.Port})");
+
+
+
+
+
+
+
+                }
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+            catch (Exception ex)
+
+
+
+
+
+
+
+            {
+
+
+
+
+
+
+
+                Console.WriteLine($"⚠ Fiscal receipt printing failed: {ex.Message}");
+
+
+
+
+
+
+
+                // Η φορολογική έκδοση έχει ήδη ολοκληρωθεί. Η φυσική εκτύπωση είναι best-effort.
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            pendingCardPayment = null;
+
+
+
+
+
+
+
+            cardTransactionId = "";
+
+
+
+
+
+
+
+            pendingCardTerminalId = "";
+
+
+
+
+
+
+
+            pendingCardAmount = 0m;
+
+
+
+
+
+
+
+            pendingCardDocumentKind = FiscalDocumentKind.Receipt;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            lastDocumentLabel = kind == FiscalDocumentKind.Invoice ? "Τιμολόγιο" : "Απόδειξη";
+
+
+
+
+
+
+
+            lastSeriesAndNumber = $"{o.InvoiceSeriesName}-{o.InvoiceNumber}";
+
+
+
+
+
+
+
+            lastMark = o.ParochosMark;
+
+
+
+
+
+
+
+            lastPdfUrl = o.ParochosPdfUrl;
+
+
+
+
+
+
+
+            closeStep = 5;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+        catch (Exception ex)
+
+
+
+
+
+
+
+        {
+
+
+
+
+
+
+
+            fiscalError = $"Απρόσμενο σφάλμα: {ex.Message} — Το τραπέζι ΔΕΝ έκλεισε, δοκίμασε ξανά.";
+
+
+
+
+
+
+
+            closeStep = 2;
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private void FinishClosing()
+
+
+
+
+
+
+
+    {
+
+
+
+
+
+
+
+        showPaymentModal = false;
+
+
+
+
+
+
+
+        Nav.NavigateTo("/waiter");
+
+
+
+
+
+
+
+    }
+}

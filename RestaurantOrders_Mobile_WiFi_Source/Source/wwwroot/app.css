@@ -1,0 +1,1879 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    margin: 0;
+    background: #f4f4f6;
+    color: #222;
+}
+
+.topbar {
+    background: #1f2a44;
+    color: white;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+    .topbar .brand {
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+
+    .topbar nav {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .topbar a {
+        color: white;
+        text-decoration: none;
+        padding: 6px 10px;
+        border-radius: 6px;
+    }
+
+        .topbar a:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+.userinfo {
+    opacity: 0.85;
+    font-size: 0.9rem;
+}
+
+.linkbtn {
+    background: #c0392b;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+main .content {
+    padding: 16px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.login-box {
+    max-width: 340px;
+    margin: 80px auto;
+    background: white;
+    padding: 24px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+
+    .login-box form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .login-box input {
+        padding: 10px;
+        font-size: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+    }
+
+    .login-box button {
+        margin-top: 8px;
+        padding: 10px;
+        background: #1f2a44;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        cursor: pointer;
+    }
+
+.error {
+    color: #c0392b;
+}
+
+.table-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+}
+
+.table-btn {
+    padding: 20px 8px;
+    font-size: 1.1rem;
+    background: white;
+    border: 2px solid #1f2a44;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+}
+
+    .table-btn .tname {
+        font-weight: bold;
+    }
+
+    .table-btn .tamount {
+        font-size: 0.85rem;
+        color: #2e7d32;
+        font-weight: bold;
+    }
+
+    .table-btn:hover {
+        background: #1f2a44;
+        color: white;
+    }
+
+        .table-btn:hover .tamount {
+            color: #a5d6a7;
+        }
+
+.order-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 800px) {
+    .order-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.item-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.menu-item-btn {
+    padding: 14px 8px;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+    .menu-item-btn:hover {
+        border-color: #1f2a44;
+    }
+
+    .menu-item-btn .price {
+        color: #666;
+        font-size: 0.85rem;
+    }
+
+.order-panel {
+    background: white;
+    border-radius: 10px;
+    padding: 16px;
+    height: fit-content;
+    position: sticky;
+    top: 12px;
+}
+
+.order-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px 0;
+}
+
+    .order-list li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+        .order-list li.printed {
+            color: #777;
+        }
+
+.sent-tag {
+    font-size: 0.75rem;
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.remove-btn {
+    border: none;
+    background: #eee;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+}
+
+.total {
+    font-size: 1.1rem;
+}
+
+.send-btn, .close-btn {
+    width: 100%;
+    padding: 12px;
+    margin-top: 8px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.send-btn {
+    background: #2e7d32;
+    color: white;
+}
+
+    .send-btn:disabled {
+        background: #aaa;
+        cursor: not-allowed;
+    }
+
+.close-btn {
+    background: #eee;
+    color: #333;
+}
+
+.status {
+    margin-top: 10px;
+    font-size: 0.9rem;
+}
+
+.admin-form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+    .admin-form input, .admin-form select {
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+    }
+
+    .admin-form button {
+        padding: 8px 16px;
+        background: #1f2a44;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+    .admin-table th, .admin-table td {
+        text-align: left;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .admin-table .danger {
+        background: #c0392b;
+        color: white;
+        border: none;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+.hint {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+/* --- User picker login --- */
+.userpick-wrap {
+    max-width: 700px;
+    margin: 40px auto;
+    text-align: center;
+}
+
+.user-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+}
+
+.user-tile {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    padding: 18px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+    .user-tile:hover {
+        border-color: #1f2a44;
+    }
+
+    .user-tile .avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: #1f2a44;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+    }
+
+.linkbtn-plain {
+    margin-top: 10px;
+    background: none;
+    border: none;
+    color: #1f2a44;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.subtitle {
+    color: #666;
+    margin-top: 4px;
+}
+
+.admin-link {
+    display: inline-block;
+    margin-top: 24px;
+    color: #888;
+    font-size: 0.85rem;
+    text-decoration: underline;
+}
+
+.pin-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.pin-box {
+    background: white;
+    border-radius: 16px;
+    padding: 28px;
+    width: 300px;
+    text-align: center;
+}
+
+.pin-username {
+    font-size: 1.15rem;
+    font-weight: bold;
+    margin-bottom: 14px;
+}
+
+.pin-dots {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 10px;
+}
+
+.dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #1f2a44;
+    display: inline-block;
+}
+
+    .dot.filled {
+        background: #1f2a44;
+    }
+
+.numpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 16px;
+}
+
+    .numpad button {
+        padding: 16px 0;
+        font-size: 1.2rem;
+        border-radius: 10px;
+        border: 1px solid #ccc;
+        background: #f4f4f6;
+        cursor: pointer;
+    }
+
+        .numpad button.ghost {
+            background: white;
+            font-size: 0.85rem;
+        }
+
+/* --- Category tabs & compose panel --- */
+.category-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.cat-tab {
+    padding: 10px 16px;
+    border-radius: 20px;
+    border: 1px solid #ccc;
+    background: white;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+    .cat-tab.active {
+        background: #1f2a44;
+        color: white;
+        border-color: #1f2a44;
+    }
+
+.menu-item-btn.selected {
+    border-color: #2e7d32;
+    box-shadow: 0 0 0 2px #2e7d32 inset;
+}
+
+.compose-panel {
+    background: white;
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 10px;
+    border: 1px solid #ddd;
+}
+
+.qty-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 0;
+}
+
+    .qty-row button {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 1px solid #ccc;
+        background: #f4f4f6;
+        font-size: 1.1rem;
+        cursor: pointer;
+    }
+
+.extra-toggle-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid #1f2a44;
+    background: white;
+    color: #1f2a44;
+    cursor: pointer;
+}
+
+.extra-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.chip {
+    padding: 6px 12px;
+    border-radius: 16px;
+    border: 1px solid #ccc;
+    background: #f4f4f6;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+    .chip.chip-on {
+        background: #2e7d32;
+        color: white;
+        border-color: #2e7d32;
+    }
+
+.compose-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+    .compose-actions .send-btn, .compose-actions .close-btn {
+        width: auto;
+        flex: 1;
+        margin-top: 0;
+    }
+
+/* Αρχική οθόνη - καλωσόρισμα με 3 επιλογές */
+.welcome-wrap {
+    max-width: 560px;
+    margin: 60px auto;
+    text-align: center;
+}
+
+    .welcome-wrap h1 {
+        font-size: 1.8rem;
+    }
+
+.welcome-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 30px;
+}
+
+.welcome-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px;
+    font-size: 1.15rem;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+    .welcome-btn .icon {
+        font-size: 1.6rem;
+    }
+
+    .welcome-btn.order {
+        background: #2e7d32;
+        color: white;
+    }
+
+    .welcome-btn.edit {
+        background: #1f2a44;
+        color: white;
+    }
+
+    .welcome-btn.adduser {
+        background: #eee;
+        color: #222;
+    }
+
+/* Καρτέλες επιλογής χρήστη (login / order-login) */
+.userpick-wrap {
+    max-width: 700px;
+    margin: 40px auto;
+    text-align: center;
+}
+
+.login-box {
+    max-width: 320px;
+    margin: 20px auto 0;
+    background: white;
+    padding: 24px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+
+    .login-box form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .login-box input {
+        padding: 10px;
+        font-size: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+    }
+
+    .login-box button[type="submit"] {
+        margin-top: 8px;
+        padding: 10px;
+        background: #1f2a44;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        cursor: pointer;
+    }
+
+.job-tag {
+    font-size: 0.75rem;
+    color: #666;
+    background: #f0f0f0;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* Φόρμες admin με ετικέτες (quick-add-user, users) */
+.quick-add-form {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 420px;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+    text-align: left;
+}
+
+    .form-row label {
+        font-size: 0.85rem;
+        color: #555;
+    }
+
+.success {
+    color: #2e7d32;
+    font-weight: bold;
+}
+
+.bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    background: #eef1f6;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+    .bulk-bar select {
+        padding: 6px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+    }
+
+    .bulk-bar button {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        background: #1f2a44;
+        color: white;
+    }
+
+        .bulk-bar button.danger {
+            background: #c0392b;
+        }
+
+        .bulk-bar button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+
+.quick-add-form textarea {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+/* Admin: περιοχές (area chips) */
+.area-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 20px;
+}
+
+.area-chip {
+    background: #eef1f6;
+    padding: 6px 10px;
+    border-radius: 16px;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+    .area-chip button {
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: #c0392b;
+        font-weight: bold;
+    }
+
+/* Admin: κάρτες τραπεζιών με drag-and-drop */
+.table-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.table-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: grab;
+}
+
+    .table-card.dragging {
+        opacity: 0.4;
+    }
+
+    .table-card .drag-handle {
+        color: #999;
+        font-size: 1.2rem;
+        cursor: grab;
+    }
+
+    .table-card .tname {
+        font-weight: bold;
+        min-width: 120px;
+    }
+
+    .table-card select {
+        padding: 6px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+    }
+
+    .table-card .inline-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.9rem;
+    }
+
+    .table-card .danger {
+        margin-left: auto;
+    }
+
+/* Κάτοψη μαγαζιού (admin) - ελεύθερη τοποθέτηση τραπεζιών */
+.floorplan-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 800px) {
+    .floorplan-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.floorplan-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.table-pick-btn {
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    background: white;
+    cursor: pointer;
+}
+
+    .table-pick-btn.placed {
+        border-color: #2e7d32;
+    }
+
+    .table-pick-btn.selected {
+        background: #1f2a44;
+        color: white;
+        border-color: #1f2a44;
+    }
+
+.floorplan-canvas-wrap {
+    overflow-x: auto;
+}
+
+.floorplan-canvas {
+    position: relative;
+    width: 900px;
+    height: 500px;
+    background: linear-gradient(90deg, #eee 1px, transparent 1px), linear-gradient(#eee 1px, transparent 1px);
+    background-size: 30px 30px;
+    background-color: #fafafa;
+    border: 2px dashed #bbb;
+    border-radius: 10px;
+    cursor: crosshair;
+}
+
+.floor-table {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 10px 22px 10px 14px;
+    border-radius: 8px;
+    border: 2px solid #1f2a44;
+    background: white;
+    font-weight: bold;
+    cursor: grab;
+    white-space: nowrap;
+    touch-action: none;
+    user-select: none;
+}
+
+    .floor-table.selected {
+        background: #1f2a44;
+        color: white;
+        box-shadow: 0 0 0 4px rgba(31,42,68,0.25);
+    }
+
+    .floor-table.dragging {
+        box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        z-index: 10;
+        cursor: grabbing;
+        opacity: 0.9;
+    }
+
+.floor-table-remove {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: #c0392b;
+    color: white;
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* Κάτοψη στην οθόνη σερβιτόρου - responsive εκδοχή */
+.floorplan-view {
+    position: relative;
+    width: 100%;
+    height: 420px;
+    background: linear-gradient(90deg, #eee 1px, transparent 1px), linear-gradient(#eee 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-color: #fafafa;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.floor-table-btn {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 2px solid #1f2a44;
+    background: white;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+    .floor-table-btn .tname {
+        font-weight: bold;
+        font-size: 0.95rem;
+    }
+
+    .floor-table-btn .tamount {
+        font-size: 0.75rem;
+        color: #2e7d32;
+        font-weight: bold;
+    }
+
+/* Ακορντεόν κατηγοριών στην παραγγελία τραπεζιού */
+.category-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.category-section {
+    background: white;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+}
+
+.category-header {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    background: white;
+    border: none;
+    font-size: 1.05rem;
+    font-weight: bold;
+    cursor: pointer;
+    text-align: left;
+}
+
+    .category-header.expanded {
+        background: #1f2a44;
+        color: white;
+    }
+
+    .category-header .chevron {
+        font-size: 0.8rem;
+    }
+
+.category-section .item-grid {
+    padding: 12px;
+    margin-bottom: 0;
+}
+
+.export-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: #2e7d32;
+    color: white;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+    .export-btn:hover {
+        background: #256428;
+    }
+
+.payment-choice {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.pay-btn {
+    flex: 1;
+    padding: 20px 8px;
+    border-radius: 10px;
+    border: none;
+    font-size: 1.1rem;
+    font-weight: bold;
+    cursor: pointer;
+    color: white;
+}
+
+    .pay-btn.cash {
+        background: #2e7d32;
+    }
+
+    .pay-btn.card {
+        background: #1565c0;
+    }
+
+.waiter-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.cashier-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 18px;
+    background: #6a1b9a;
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+    .cashier-btn:hover {
+        background: #55157b;
+    }
+
+.admin-form button.danger {
+    background: #c0392b;
+}
+
+.dayclose-card {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+    .dayclose-card h4 {
+        margin-top: 0;
+    }
+
+/* --- Invoice / AADE customer lookup --- */
+.invoice-form {
+    width: 100%;
+    text-align: left;
+}
+
+.pin-box:has(.invoice-form) {
+    width: min(520px, calc(100vw - 32px));
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 22px;
+}
+
+.invoice-form-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e7e9ee;
+}
+
+    .invoice-form-header h3 {
+        margin: 0 0 4px;
+        color: #1f2a44;
+        font-size: 1.12rem;
+    }
+
+    .invoice-form-header p {
+        margin: 0;
+        color: #737b8c;
+        font-size: .82rem;
+        line-height: 1.4;
+    }
+
+.invoice-form-icon {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 42px;
+    border-radius: 12px;
+    background: #eef3ff;
+    font-size: 20px;
+}
+
+.invoice-grid {
+    display: grid;
+    grid-template-columns: 1fr 120px;
+    gap: 12px;
+}
+
+.invoice-field {
+    min-width: 0;
+}
+
+.invoice-field-full {
+    grid-column: 1 / -1;
+}
+
+.invoice-field label {
+    display: block;
+    margin: 0 0 6px;
+    color: #454d5e;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
+    .invoice-field label span {
+        color: #c0392b;
+    }
+
+.invoice-input,
+.invoice-form .vat-lookup-row input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid #d5d9e1;
+    border-radius: 9px;
+    background: #fff;
+    padding: 9px 11px;
+    color: #242936;
+    font-size: .92rem;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+    .invoice-input::placeholder,
+    .invoice-form .vat-lookup-row input::placeholder {
+        color: #a2a8b5;
+    }
+
+    .invoice-input:focus,
+    .invoice-form .vat-lookup-row input:focus {
+        border-color: #7184b6;
+        box-shadow: 0 0 0 3px rgba(31,42,68,.08);
+    }
+
+.invoice-form .vat-lookup-row {
+    display: flex;
+    align-items: stretch;
+    gap: 7px;
+}
+
+    .invoice-form .vat-lookup-row input {
+        flex: 1;
+    }
+
+.vat-search-btn {
+    width: 42px;
+    min-width: 42px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid #c8cfdb;
+    border-radius: 9px;
+    background: #f6f8fb;
+    color: #1f2a44;
+    cursor: pointer;
+    font-size: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+
+    .vat-search-btn:hover:not(:disabled) {
+        background: #eef3ff;
+        border-color: #9aa9c7;
+        transform: translateY(-1px);
+    }
+
+    .vat-search-btn:disabled {
+        cursor: wait;
+        opacity: .7;
+    }
+
+.aade-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 13px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    font-size: .82rem;
+    line-height: 1.4;
+}
+
+    .aade-status.loading {
+        background: #f5f7fb;
+        border: 1px solid #e0e4ec;
+        color: #60697a;
+    }
+
+    .aade-status.error-status {
+        background: #fff5f3;
+        border: 1px solid #f2c9c2;
+        color: #a23628;
+    }
+
+.aade-customer-info {
+    margin-top: 13px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #f4f8ff;
+    border: 1px solid #d8e3f7;
+}
+
+.aade-info-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 9px;
+    color: #315d92;
+    font-size: .8rem;
+    font-weight: 800;
+}
+
+.aade-info-grid {
+    display: grid;
+    gap: 8px;
+}
+
+    .aade-info-grid > div span {
+        display: block;
+        margin-bottom: 2px;
+        color: #7b8492;
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+    }
+
+    .aade-info-grid > div strong {
+        display: block;
+        color: #283244;
+        font-size: .8rem;
+        line-height: 1.35;
+    }
+
+.invoice-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.invoice-submit-btn {
+    width: 100%;
+    min-height: 44px;
+    border: 0;
+    border-radius: 10px;
+    background: #1f2a44;
+    color: #fff;
+    font-size: .92rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 3px 10px rgba(31,42,68,.18);
+    transition: transform .12s ease, background .12s ease;
+}
+
+    .invoice-submit-btn:hover {
+        background: #172137;
+        transform: translateY(-1px);
+    }
+
+    .invoice-submit-btn span {
+        margin-right: 5px;
+    }
+
+.invoice-back-btn {
+    align-self: center;
+}
+
+@media (max-width: 480px) {
+    .pin-box:has(.invoice-form) {
+        width: calc(100vw - 20px);
+        padding: 17px;
+    }
+
+    .invoice-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .invoice-field-full {
+        grid-column: auto;
+    }
+}
+
+
+/* Unified, polished navigation buttons throughout the app */
+a.nav-button,
+.topbar nav > a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 38px;
+    margin: 6px 4px 0;
+    padding: 8px 15px;
+    border: 1px solid #d7e2f1;
+    border-radius: 999px;
+    background: #edf3fb;
+    color: #2d4568;
+    font-size: .9rem;
+    font-weight: 750;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 5px rgba(31,42,68,.07);
+    transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+a.nav-button:hover,
+.topbar nav > a:hover {
+    background: #dfeafb;
+    border-color: #bfd0e9;
+    color: #203a60;
+    text-decoration: none;
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(31,42,68,.11);
+}
+
+a.nav-button:focus-visible,
+.topbar nav > a:focus-visible {
+    outline: 3px solid rgba(89,132,195,.3);
+    outline-offset: 2px;
+}
+
+/* Top navigation uses light button pills on the dark header */
+.topbar nav > a {
+    margin: 0;
+    min-height: 34px;
+    padding: 7px 12px;
+    background: rgba(255,255,255,.94);
+    border-color: rgba(220,231,246,.9);
+    color: #263b59;
+    font-size: .82rem;
+}
+
+.topbar nav > a:hover {
+    background: #dfeafb;
+    border-color: #d2e1f4;
+    color: #1f3555;
+}
+
+/* Text-only back controls now have the same button treatment as navigation */
+.linkbtn-plain {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    margin: 10px 4px 0;
+    padding: 8px 15px;
+    border: 1px solid #d7e2f1;
+    border-radius: 10px;
+    background: #edf3fb;
+    color: #2d4568;
+    font: inherit;
+    font-size: .9rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.linkbtn-plain:hover:not(:disabled) {
+    background: #dfeafb;
+    border-color: #bfd0e9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(31,42,68,.09);
+}
+
+.linkbtn-plain:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+@media (max-width: 680px) {
+    .topbar nav {
+        gap: 7px;
+    }
+
+    .topbar nav > a {
+        white-space: normal;
+        text-align: center;
+    }
+
+    a.nav-button {
+        white-space: normal;
+    }
+}
+
+
+/* ================================================================
+   Navigation links must look like real buttons across every screen.
+   This explicit final rule overrides the original text-link styling.
+   Does not target category/product tiles or the customizable action buttons.
+   ================================================================ */
+a.admin-link,
+a.back-nav-link,
+a.nav-button {
+    appearance: none;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+    margin: 16px 4px 0;
+    padding: 10px 18px;
+    border: 1px solid #d5e1ef;
+    border-radius: 11px;
+    background: #edf3fb;
+    color: #304967;
+    font-family: inherit;
+    font-size: .92rem;
+    font-weight: 750;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none !important;
+    vertical-align: middle;
+    white-space: normal;
+    box-shadow: 0 3px 8px rgba(31, 42, 68, .08);
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, color .15s ease,
+                transform .15s ease, box-shadow .15s ease;
+}
+
+a.admin-link:hover,
+a.back-nav-link:hover,
+a.nav-button:hover {
+    background: #dfeafb;
+    border-color: #bdd0e8;
+    color: #203a60;
+    text-decoration: none !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 13px rgba(31, 42, 68, .12);
+}
+
+a.admin-link:focus-visible,
+a.back-nav-link:focus-visible,
+a.nav-button:focus-visible,
+.topbar nav > a:focus-visible {
+    outline: 3px solid rgba(89, 132, 195, .34);
+    outline-offset: 2px;
+}
+
+a.admin-link:active,
+a.back-nav-link:active,
+a.nav-button:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(31, 42, 68, .08);
+}
+
+/* Header navigation is also button-shaped, with contrast on the dark bar. */
+.topbar nav > a {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    margin: 0;
+    padding: 7px 12px;
+    border: 1px solid #dce7f6;
+    border-radius: 10px;
+    background: #f4f7fc;
+    color: #263b59;
+    font-size: .84rem;
+    font-weight: 750;
+    line-height: 1.2;
+    text-decoration: none !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, .08);
+    transition: background .15s ease, border-color .15s ease, color .15s ease,
+                transform .15s ease, box-shadow .15s ease;
+}
+
+.topbar nav > a:hover {
+    background: #dfeafb;
+    border-color: #c4d7ee;
+    color: #1f3555;
+    text-decoration: none !important;
+    transform: translateY(-1px);
+    box-shadow: 0 5px 10px rgba(0, 0, 0, .12);
+}
+
+@media (max-width: 680px) {
+    a.admin-link,
+    a.back-nav-link,
+    a.nav-button {
+        min-height: 40px;
+        max-width: 100%;
+        padding: 9px 14px;
+        white-space: normal;
+    }
+
+    .topbar nav > a {
+        white-space: normal;
+        text-align: center;
+    }
+}
+
+
+/* ================================================================
+   RestaurantOrders Mobile Wi-Fi layout (Android + iOS browsers)
+   This deliberately does not override product/category color settings.
+   ================================================================ */
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-padding-top: 12px;
+}
+
+button, input, select, textarea, a {
+    touch-action: manipulation;
+}
+
+button, input, select, textarea {
+    font: inherit;
+}
+
+/* Table selection is easy to tap on phones. */
+@media (max-width: 680px) {
+    main .content {
+        padding: 10px;
+    }
+
+    .topbar {
+        padding: 10px 12px;
+        gap: 8px;
+        align-items: flex-start;
+    }
+
+    .topbar .brand {
+        font-size: 1.05rem;
+    }
+
+    .topbar nav {
+        width: 100%;
+        gap: 7px;
+        justify-content: flex-start;
+    }
+
+    .topbar nav > a {
+        flex: 0 0 auto;
+        min-height: 42px;
+        padding: 9px 12px;
+        font-size: .86rem;
+    }
+
+    .tables-page {
+        padding: 10px !important;
+        min-height: calc(100dvh - 48px);
+    }
+
+    .waiter-topbar {
+        align-items: flex-start;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .waiter-topbar h2 {
+        margin: 4px 0 6px;
+        font-size: 1.35rem;
+    }
+
+    .waiter-topbar .hint,
+    .tables-page .hint {
+        line-height: 1.4;
+    }
+
+    .table-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+    }
+
+    .table-btn {
+        min-width: 0;
+        min-height: 92px;
+        padding: 14px 8px;
+        border-radius: 12px;
+        font-size: 1rem;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .table-btn .tname {
+        overflow-wrap: anywhere;
+        text-align: center;
+    }
+
+    .floorplan-view {
+        height: min(56dvh, 440px);
+        min-height: 300px;
+        margin-bottom: 14px;
+        overflow: hidden;
+        background-size: 20px 20px;
+    }
+
+    .floor-table-btn {
+        max-width: 44%;
+        min-height: 54px;
+        padding: 8px 9px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        touch-action: manipulation;
+    }
+
+    .floor-table-btn .tname {
+        text-align: center;
+        font-size: .88rem;
+    }
+
+    .floor-table-btn .tamount {
+        font-size: .72rem;
+        text-align: center;
+    }
+
+    .category-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding: 2px 1px 8px;
+        margin-right: -2px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+
+    .cat-tab {
+        flex: 0 0 auto;
+        min-height: 44px;
+        padding: 10px 14px;
+    }
+
+    .table-order-page {
+        width: 100%;
+        max-width: 100%;
+        margin-left: 0;
+        padding: 10px !important;
+        min-height: calc(100dvh - 48px);
+        overflow-x: clip;
+    }
+
+    .table-order-page > h2 {
+        margin: 12px 0;
+        font-size: 1.35rem;
+        overflow-wrap: anywhere;
+    }
+
+    .table-order-page > a.nav-button {
+        min-height: 44px;
+        margin: 3px 0 6px;
+    }
+
+    .order-layout {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 10px;
+    }
+
+    .category-panel {
+        position: static;
+        padding: 9px;
+        border-radius: 12px;
+    }
+
+    .category-panel-title {
+        margin: 2px 4px 8px;
+    }
+
+    .category-list {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 7px;
+        overflow-x: auto;
+        padding: 1px 1px 7px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+
+    .category-choice {
+        flex: 0 0 auto;
+        min-width: max-content;
+        max-width: 78vw;
+        min-height: 46px;
+        padding: 10px 14px;
+        border-radius: 11px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .products-panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 10px 12px;
+        font-size: .96rem;
+        box-shadow: 0 2px 6px rgba(31,42,68,.05);
+    }
+
+    .products-panel .item-grid,
+    .item-grid,
+    .extras-screen-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .products-panel .menu-item-btn,
+    .menu-item-btn,
+    .extras-screen-grid .menu-item-btn {
+        min-height: 76px;
+        padding: 12px 8px;
+        border-radius: 11px;
+        font-size: .91rem;
+        overflow-wrap: anywhere;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .products-panel .menu-item-btn .price,
+    .menu-item-btn .price {
+        font-size: .82rem;
+    }
+
+    .order-panel {
+        position: static !important;
+        max-height: none !important;
+        overflow: visible !important;
+        padding: 12px;
+        border-radius: 14px;
+        margin-bottom: max(16px, env(safe-area-inset-bottom));
+        box-shadow: 0 3px 14px rgba(31,42,68,.08);
+    }
+
+    .order-panel h3 {
+        margin-top: 2px;
+    }
+
+    .order-list li {
+        gap: 8px;
+        align-items: flex-start;
+        padding: 9px 0;
+        line-height: 1.35;
+    }
+
+    .order-list li > span:first-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .remove-btn {
+        flex: 0 0 36px;
+        width: 36px;
+        height: 36px;
+    }
+
+    .send-btn,
+    .close-btn,
+    .order-action-btn,
+    .invoice-submit-btn,
+    .pay-btn,
+    .compose-actions button {
+        min-height: 48px;
+        padding: 12px;
+        border-radius: 11px;
+        font-size: .95rem;
+    }
+
+    .action-button-color-hint {
+        line-height: 1.4;
+        font-size: .78rem;
+    }
+
+    .pin-overlay {
+        align-items: flex-start;
+        overflow-y: auto;
+        padding: max(12px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+    }
+
+    .pin-box {
+        width: 100%;
+        max-width: 520px;
+        margin: auto;
+        max-height: none;
+        padding: 20px 16px;
+        box-sizing: border-box;
+    }
+
+    .extras-screen-overlay {
+        padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+    }
+
+    .extras-screen-box {
+        padding: 12px;
+    }
+
+    .extras-screen-header {
+        align-items: flex-start;
+    }
+
+    .admin-table-wrap,
+    .table-responsive,
+    .admin-content {
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .admin-table {
+        min-width: 640px;
+    }
+
+    .order-background-menu,
+    .category-customization-menu,
+    .action-button-customization-menu,
+    .tables-context-menu {
+        left: 10px !important;
+        right: 10px;
+        top: max(10px, env(safe-area-inset-top)) !important;
+        width: auto;
+        max-width: none;
+        max-height: calc(100dvh - 20px);
+        overflow-y: auto;
+    }
+}
+
+@media (max-width: 380px) {
+    .table-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .products-panel .item-grid,
+    .item-grid,
+    .extras-screen-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .table-btn {
+        min-height: 84px;
+    }
+
+    .products-panel .menu-item-btn,
+    .menu-item-btn,
+    .extras-screen-grid .menu-item-btn {
+        min-height: 70px;
+        font-size: .86rem;
+    }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .table-btn:hover,
+    .menu-item-btn:hover,
+    .category-choice:hover,
+    .cat-tab:hover,
+    .topbar nav > a:hover,
+    a.nav-button:hover {
+        transform: none;
+    }
+}
+
+
+/* Blazor Server reconnect status for mobile browsers */
+.ro-reconnect-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, .62);
+    backdrop-filter: blur(4px);
+}
+.ro-reconnect-modal.components-reconnect-show,
+.ro-reconnect-modal.components-reconnect-failed,
+.ro-reconnect-modal.components-reconnect-rejected {
+    display: flex;
+}
+.ro-reconnect-card {
+    width: min(100%, 360px);
+    padding: 22px;
+    border-radius: 18px;
+    background: #fff;
+    color: #243047;
+    box-shadow: 0 18px 50px rgba(0,0,0,.25);
+    text-align: center;
+}
+.ro-reconnect-card p { margin: 10px 0 16px; color: #64748b; }
+.ro-reconnect-card .components-reconnect-failed,
+.ro-reconnect-card .components-reconnect-rejected { display: none; }
+.ro-reconnect-modal.components-reconnect-failed .components-reconnect-failed,
+.ro-reconnect-modal.components-reconnect-rejected .components-reconnect-rejected { display: block; margin: 10px 0; color: #b91c1c; }
+.ro-reconnect-card button { min-height: 46px; width: 100%; border: 0; border-radius: 12px; background: #365f9d; color: #fff; font-weight: 700; font-size: 1rem; }

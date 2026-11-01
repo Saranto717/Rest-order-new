@@ -1,0 +1,500 @@
+@page "/admin/bank-pos"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject EpayWebEcrService EpayService
+@inject MellonWebEcrService MellonService
+@inject EdpsWebEcrService EdpsService
+@inject VivaCloudTerminalService VivaService
+
+<h2>Τραπεζικά POS</h2>
+<p class="hint">Εδώ αποθηκεύονται οι ρυθμίσεις ανά πάροχο/τερματικό. Η αποθήκευση ρυθμίσεων δεν σημαίνει ότι έχει ενεργοποιηθεί χρέωση: η πραγματική συναλλαγή απαιτεί τον αντίστοιχο επίσημο connector και δοκιμή με το συγκεκριμένο POS.</p>
+<p class="hint">Ασφάλεια: τα διαπιστευτήρια αποθηκεύονται στην τοπική βάση SQLite της εφαρμογής. Προστάτευσε το αρχείο της βάσης και τα αντίγραφα ασφαλείας. Μην χρησιμοποιήσεις παραγωγικούς κωδικούς πριν υλοποιηθεί και ελεγχθεί η σύνδεση του παρόχου.</p>
+
+<div class="admin-form quick-add-form">
+    <div class="form-row"><label>Αποθηκευμένο τερματικό</label>
+        <select value="@selectedId" @onchange="SelectTerminal">
+            <option value="0">+ Νέα ρύθμιση τερματικού</option>
+            @foreach (var item in terminals) { <option value="@item.Id">@item.Name — @item.Provider (@item.TerminalId)</option> }
+        </select>
+    </div>
+    <div class="form-row"><label>Όνομα τερματικού</label><input @bind="edit.Name" placeholder="π.χ. Ταμείο 1" /></div>
+    <div class="form-row"><label>Τράπεζα / πάροχος</label>
+        <select @bind="edit.Provider" @bind:after="ProviderChanged">
+            @if (!Providers.Contains(edit.Provider)) { <option value="@edit.Provider">@edit.Provider</option> }
+            @foreach (var provider in Providers) { <option value="@provider">@provider</option> }
+        </select>
+    </div>
+    <div class="form-row"><label>Πρωτόκολλο / τρόπος σύνδεσης</label>
+        <select @bind="edit.Protocol" @bind:after="ProtocolChanged">
+            @foreach (var protocol in ProtocolsFor(edit.Provider)) { <option value="@protocol">@protocol</option> }
+        </select>
+    </div>
+    <div class="form-row"><label><input type="checkbox" @bind="edit.UseProduction" @bind:after="EnvironmentChanged" /> Παραγωγικό περιβάλλον</label></div>
+    <div class="form-row"><label><input type="checkbox" @bind="edit.IsEnabled" /> Ενεργό τερματικό (ρύθμιση μόνο)</label></div>
+    <div class="form-row"><label>Terminal ID</label><input @bind="edit.TerminalId" /></div>
+    @if (!IsVivaCloud)
+    {
+        <div class="form-row"><label>@(IsEdpsMiddlewareV6 ? "Middleware route terminal ID (προαιρετικό)" : "WebECR terminal backend ID (προαιρετικό)")</label><input @bind="edit.IdUrl" placeholder="@(IsEdpsMiddlewareV6 ? "Κενό = προτεινόμενο /terminal/txninit" : "Άφησέ το κενό για αυτόματη αναζήτηση με Terminal ID")" /></div>
+    }
+    <div class="form-row"><label>@(IsVivaCloud ? "Viva Cash Register ID (ECR ID)" : IsEdpsMiddlewareV6 ? "EDPS AADE Provider Code (informational)" : IsEpay ? "Acquirer / WebECR Provider Code" : "Provider Code (πάροχος)")</label><input @bind="edit.ProviderCode" /></div>
+    @if (IsEdpsMiddlewareV6 || IsEpay || IsCommonWebEcr || IsVivaCloud)
+    {
+        <div class="form-row"><label>Parochos NSP Code</label><input @bind="edit.ParochosNspCode" placeholder="@NspCodePlaceholder" /></div>
+        <div class="form-row"><label>ProviderId υπογραφής Parochos</label><input type="number" min="1" @bind="edit.ProviderId" /></div>
+    }
+    @if (!IsVivaCloud)
+    {
+        <div class="form-row"><label>Κωδικός POS για Redeem (one-time code)</label><input @bind="edit.RedeemCode" type="password" autocomplete="new-password" /></div>
+        <div class="form-row"><label><input type="checkbox" @bind="edit.IsAppToApp" /> Viva App-to-App (μόνο αν υποστηρίζεται από το τερματικό)</label></div>
+    }
+    @if (IsVivaCloud)
+    {
+        <div class="form-row"><button @onclick="FetchVivaTerminals" disabled="@busy">@(busy ? "Επικοινωνία με Viva…" : "Αναζήτηση ενεργών Viva POS")</button></div>
+        @if (vivaTerminals.Count > 0)
+        {
+            <div class="form-row"><label>Ενεργό Viva POS</label><select @bind="selectedVivaTerminalId"><option value="">Επίλεξε τερματικό…</option>@foreach (var t in vivaTerminals) { <option value="@t.TerminalId">@t.TerminalId — Status @t.StatusId — Source @t.SourceCode</option> }</select><button @onclick="UseSelectedVivaTerminal" disabled="@string.IsNullOrWhiteSpace(selectedVivaTerminalId)">Χρήση επιλεγμένου POS</button></div>
+        }
+        <p class="hint">Για Viva Cloud απαιτούνται POS APIs Client ID / Client Secret, Terminal ID και Cash Register ID (ECR ID). Τα credentials είναι διαφορετικά από τα Smart Checkout / Merchant API credentials. Ο Parochos NSP Code πρέπει να δοθεί από τον πάροχό σου· δεν συμπληρώνεται αυθαίρετα.</p>
+    }
+    @if (UsesCommonWebEcrApi)
+    {
+        <div class="form-row">
+            <button @onclick="RedeemEpay" disabled="@busy">@(busy ? "Επικοινωνία…" : "Εξαργύρωση API Key (Redeem)")</button>
+            <button @onclick="FetchEpayTerminals" disabled="@busy">Ανάκτηση ενεργών τερματικών</button>
+        </div>
+        @if (epayTerminals.Count > 0)
+        {
+            <div class="form-row"><label>Τερματικό που βρέθηκε στο WebECR</label>
+                <select @bind="selectedEpayTerminalId">
+                    <option value="">Επίλεξε τερματικό…</option>
+                    @foreach (var terminal in epayTerminals)
+                    {
+                        <option value="@terminal.BackendId">TID @terminal.TerminalId — Backend ID @terminal.BackendId — Merchant @terminal.Merchant — Acquirer @terminal.Acquirer</option>
+                    }
+                </select>
+                <button @onclick="UseSelectedEpayTerminal" disabled="@string.IsNullOrWhiteSpace(selectedEpayTerminalId)">Χρήση επιλεγμένου ID</button>
+            </div>
+        }
+    }
+    @if (IsEdpsMiddlewareV6)
+    {
+        <div class="form-row">
+            <button @onclick="RedeemEdps" disabled="@busy">@(busy ? "Επικοινωνία…" : "Εξαργύρωση κωδικού EDPS (Redeem)")</button>
+        </div>
+        <p class="hint">Το Parochos NSP code είναι 5, το ProviderId υπογραφής είναι 19 και ο κωδικός EDPS στην ΑΑΔΕ είναι 127. Το φυσικό TID είναι υποχρεωτικό και πρέπει να συμφωνεί με την υπογραφή Parochos. Το route terminal ID είναι προαιρετικό: κενό χρησιμοποιεί το προτεινόμενο /terminal/txninit του API v6. Συμπλήρωσε τα στοιχεία Web API που σου έδωσε η EDPS και πάτησε Redeem.</p>
+    }
+    @if (UsesCommonWebEcrApi)
+    {
+        <p class="hint">Το κοινό EFTPOS-WebECR REST API χρησιμοποιεί τα ίδια πεδία σύνδεσης και την ίδια ροή token, Redeem, terminal list και txninit. Για ePay το Parochos NSP Code είναι 2. Για τους υπόλοιπους παρόχους χρησιμοποίησε τον κωδικό του πίνακα/σύμβασής σου με τον Parochos. Το φυσικό Terminal ID και το NSP Code χρησιμοποιούνται για την υπογραφή· το WebECR backend ID μόνο στη διαδρομή συναλλαγής.</p>
+    }
+    @if (!IsVivaCloud)
+    {
+        <div class="form-row"><label>Merchant / Company ID</label><input @bind="edit.MerchantId" /></div>
+    }
+    <div class="form-row"><label>@(IsVivaCloud ? "Viva POS APIs Client ID" : IsEdpsMiddlewareV6 ? "EDPS API Key POS (επιστρέφει το Redeem)" : "API Key / Client ID")</label><input @bind="edit.ApiKey" type="@(IsEdpsMiddlewareV6 ? "password" : "text")" autocomplete="off" /></div>
+    <div class="form-row"><label>@(IsVivaCloud ? "Viva POS APIs Client Secret" : IsEdpsMiddlewareV6 ? "EDPS integrator X-Api-Key (αν απαιτείται)" : "API Secret / Token")</label><input @bind="edit.ApiSecret" type="password" autocomplete="new-password" /></div>
+    @if (!IsVivaCloud)
+    {
+        <div class="form-row"><label>Username</label><input @bind="edit.Username" autocomplete="off" /></div>
+        <div class="form-row"><label>Password</label><input @bind="edit.Password" type="password" autocomplete="new-password" /></div>
+        <div class="form-row"><label>@(IsCommonWebEcr ? "Παραγωγικό Base URL Mellon (ανά τράπεζα)" : IsEdpsMiddlewareV6 ? "Base URL EDPS Web API" : "Base URL WebECR")</label><input @bind="edit.Endpoint" @bind:after="MellonEndpointsChanged" placeholder="@EndpointPlaceholder" /></div>
+        <div class="form-row"><label>@(IsCommonWebEcr ? "Παραγωγικό Auth URL Mellon" : "Auth URL (POST token)")</label><input @bind="edit.AuthEndpoint" @bind:after="MellonEndpointsChanged" placeholder="@AuthEndpointPlaceholder" /></div>
+        <div class="form-row"><label>@(IsCommonWebEcr ? "Παραγωγικό Redeem URL Mellon" : "Redeem URL (POST authorization/redeem)")</label><input @bind="edit.RedeemEndpoint" @bind:after="MellonEndpointsChanged" placeholder="@RedeemEndpointPlaceholder" /></div>
+    }
+    @if (IsVivaCloud)
+    {
+        <div class="form-row"><label>Viva Base URL (ECR API)</label><input @bind="edit.Endpoint" placeholder="https://demo-api.vivapayments.com/ ή https://demo-api.vivapayments.com/ecr/v1" /></div>
+        <div class="form-row"><label>Viva Auth URL (OAuth2 token)</label><input @bind="edit.AuthEndpoint" placeholder="https://demo-accounts.vivapayments.com/connect/token" /></div>
+        <p class="hint">Συμπλήρωσε εσύ τα URLs που σου έχει δώσει η Viva. Μπορείς να βάλεις Base URL είτε μέχρι το domain είτε ολόκληρο μέχρι /ecr/v1. Αν κάποιο πεδίο μείνει κενό, χρησιμοποιείται η προεπιλεγμένη διεύθυνση του Demo ή Production.</p>
+    }
+    @if (IsEdpsMiddlewareV6)
+    {
+        <p class="hint">Για το EDPS UAT που χρησιμοποιείς: Base URL https://webapi-uat.ecr.novidea.gr, Auth URL /token και Redeem URL /authorization/redeem. Το http://localhost:8080 είναι μόνο local MW δείγμα και λειτουργεί μόνο αν η αντίστοιχη υπηρεσία EDPS τρέχει στον ίδιο server με την εφαρμογή. Για παραγωγή χρησιμοποίησε το production URL και credentials που έχει εκδώσει η EDPS.</p>
+    }
+    @if (IsCommonWebEcr)
+    {
+        <p class="hint">Συμπλήρωσε τα τρία πλήρη παραγωγικά URLs που σου έδωσε η τράπεζα. Αποθηκεύονται σε αυτό το POS και διατηρούνται όταν αλλάζεις περιβάλλον. Η πληρωμή χρησιμοποιεί πάντα την τράπεζα και το περιβάλλον του επιλεγμένου POS.</p>
+        @if (!edit.UseProduction)
+        {
+            <p class="hint">Κοινό demo για όλες τις τράπεζες Mellon:<br />Base: @MellonConnectionSettings.DemoBaseUrl<br />Auth: @MellonConnectionSettings.DemoAuthUrl<br />Redeem: @MellonConnectionSettings.DemoRedeemUrl</p>
+        }
+    }
+    else if (!IsVivaCloud)
+    {
+        <p class="hint">Όλα τα URLs και τα credentials είναι παραμετροποιήσιμα. Αν αφήσεις Auth URL ή Redeem URL κενό, χρησιμοποιείται αντίστοιχα το Base URL + token ή authorization/redeem.</p>
+    }
+    @if (UsesCommonWebEcrApi)
+    {
+        <p class="hint">Πάτησε πρώτα «Εξαργύρωση API Key (Redeem)» και μετά «Ανάκτηση ενεργών τερματικών». Το backend ID που επιστρέφει το WebECR είναι διαφορετικό από το φυσικό TID.</p>
+    }
+    <div class="form-row"><label>IP διεύθυνση (TCP/IP)</label><input @bind="edit.IpAddress" placeholder="π.χ. 192.168.1.50" /></div>
+    <div class="form-row"><label>Port</label><input type="number" @bind="edit.Port" /></div>
+    <div class="form-row"><label>Timeout (δευτερόλεπτα)</label><input type="number" @bind="edit.TimeoutSeconds" /></div>
+    <div class="form-row"><label>Σημειώσεις / απαιτήσεις παρόχου</label><textarea @bind="edit.Notes" rows="3"></textarea></div>
+    <div class="form-row">
+        <button @onclick="Save">Αποθήκευση ρυθμίσεων</button>
+        @if (edit.Id != 0) { <button class="danger" @onclick="Delete">Διαγραφή ρύθμισης</button> }
+        <button @onclick="NewTerminal">Καθαρισμός / Νέο τερματικό</button>
+    </div>
+</div>
+@if (!string.IsNullOrWhiteSpace(message)) { <p class="@(isError ? "error" : "success")">@message</p> }
+
+<h3>Αποθηκευμένα τερματικά</h3>
+<table class="admin-table"><thead><tr><th>Όνομα</th><th>Πάροχος</th><th>Πρωτόκολλο</th><th>Περιβάλλον</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
+@foreach (var item in terminals)
+{
+    <tr><td>@item.Name</td><td>@item.Provider</td><td>@item.Protocol</td><td>@(item.UseProduction ? "Παραγωγικό" : "Demo / Test")</td><td>@(item.IsEnabled ? "Ενεργό (ρύθμιση)" : "Ανενεργό")</td><td><button @onclick="() => LoadTerminal(item.Id)">Επεξεργασία</button></td></tr>
+}
+@if (terminals.Count == 0) { <tr><td colspan="6" class="hint">Δεν έχουν καταχωριστεί τερματικά.</td></tr> }
+</tbody></table>
+
+@code {
+    private static readonly string[] Providers = { "Viva", "ePay / Euronet", "Worldline / Cardlink", "NBG", "NEXI", "Mellon", "GBL", "myPOS", "JCC", "Attica", "Pancreta", "TORA", "PBT", "EDPS", "Άλλος πάροχος" };
+    private readonly List<BankPosTerminalSettings> terminals = new();
+    private BankPosTerminalSettings edit = new();
+    private string _lastProvider = "Viva";
+    private int selectedId;
+    private string? message;
+    private bool isError;
+    private bool busy;
+    private List<EpayWebEcrService.TerminalChoice> epayTerminals = new();
+    private string selectedEpayTerminalId = "";
+    private bool IsEpay => edit.Provider.Contains("ePay", StringComparison.OrdinalIgnoreCase) || edit.Provider.Contains("Euronet", StringComparison.OrdinalIgnoreCase);
+    private bool IsVivaCloud => edit.Provider.Equals("Viva", StringComparison.OrdinalIgnoreCase) && edit.Protocol.Equals("Viva Cloud", StringComparison.OrdinalIgnoreCase);
+    private List<VivaCloudTerminalService.TerminalChoice> vivaTerminals = new();
+    private string selectedVivaTerminalId = "";
+    private bool IsCommonWebEcr => CommonWebEcrProviderProfile.IsCommonRest(edit);
+    private bool UsesCommonWebEcrApi => IsEpay || IsCommonWebEcr;
+    private string NspCodePlaceholder => IsEpay ? "2 = ePay" : IsEdpsMiddlewareV6 ? "5 = EDPS" : CommonWebEcrProviderProfile.ParochosNspCodeFor(edit.Provider) ?? "Κωδικός από Parochos";
+    private string EndpointPlaceholder => IsEdpsMiddlewareV6 ? "https://webapi-uat.ecr.novidea.gr/" : "π.χ. https://.../api/v2.2/";
+    private string AuthEndpointPlaceholder => IsEdpsMiddlewareV6 ? "https://webapi-uat.ecr.novidea.gr/token" : IsCommonWebEcr ? "https://.../api/token/" : "<Base URL>/token/";
+    private string RedeemEndpointPlaceholder => IsEdpsMiddlewareV6 ? "https://webapi-uat.ecr.novidea.gr/authorization/redeem" : IsCommonWebEcr ? "https://.../api/v2.2/authorization/redeem/" : "<Base URL>/authorization/redeem/";
+    private bool IsEdpsMiddlewareV6 => edit.Provider.Equals("EDPS", StringComparison.OrdinalIgnoreCase) &&
+        (edit.Protocol.Contains("Middleware (Chronos WebECR API v6)", StringComparison.OrdinalIgnoreCase) ||
+         edit.Protocol.Contains("WebECR API v6", StringComparison.OrdinalIgnoreCase));
+
+    private static string[] ProtocolsFor(string provider) => provider switch
+    {
+        "Viva" => new[] { "Viva Cloud", "Viva Peer-to-Peer / Local API", "Viva App-to-App" },
+        "Wordline / Cardlink" => new[] { CommonWebEcrProviderProfile.ProtocolName, "Cardlink Web", "Cardlink TCP Socket / DLL" },
+        "Cardlink" or "Wordline" => new[] { CommonWebEcrProviderProfile.ProtocolName, "Cardlink Web", "Cardlink TCP Socket / DLL" },
+        "NBG" or "NBG / NSP προς επιβεβαίωση" => new[] { CommonWebEcrProviderProfile.ProtocolName },
+        "Euronet" => new[] { "Common WebECR", "Common TCP-Socket" },
+        "Mellon" => new[] { CommonWebEcrProviderProfile.ProtocolName, "Common TCP-Socket" },
+        "NEXI" => new[] { CommonWebEcrProviderProfile.ProtocolName, "Common TCP-Socket", "NEXI WebECR API" },
+        "GBL" or "Worldline / Cardlink" or "Worldline" or "JCC" or "Attica" or "Attica Bank" or "Pancreta" or "Pancreta Bank" or "TORA" or "PBT" => new[] { CommonWebEcrProviderProfile.ProtocolName },
+        "EDPS" => new[] { "EDPS Middleware (Chronos WebECR API v6)", "Common TCP Socket", "EDPS JSON Protocol" },
+        "myPOS" => new[] { CommonWebEcrProviderProfile.ProtocolName, "Common TCP-Socket", "myPOS provider-specific" },
+        "ePay / Euronet" => new[] { "ePay WebECR REST API v2.5.13" },
+        _ => new[] { "Confirm exact protocol with provider" }
+    };
+
+    protected override async Task OnInitializedAsync() { ApplyVivaEnvironmentDefaults(); await Refresh(); }
+    private async Task Refresh()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        terminals.Clear();
+        terminals.AddRange(await db.BankPosTerminalSettings.OrderBy(x => x.Name).ToListAsync());
+    }
+    private async Task SelectTerminal(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id) && id > 0) await LoadTerminal(id); else NewTerminal();
+    }
+    private async Task LoadTerminal(int id)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var item = await db.BankPosTerminalSettings.FindAsync(id);
+        if (item is null) return;
+        vivaTerminals.Clear(); selectedVivaTerminalId = "";
+        edit = item; selectedId = id; message = null; epayTerminals.Clear(); selectedEpayTerminalId = "";
+        if (edit.Provider.Equals("EDPS", StringComparison.OrdinalIgnoreCase) &&
+            (edit.Protocol.Equals("EDPS Middleware", StringComparison.OrdinalIgnoreCase) ||
+             edit.Protocol.Equals("EDPS WebECR API v6", StringComparison.OrdinalIgnoreCase)))
+            edit.Protocol = "EDPS Middleware (Chronos WebECR API v6)";
+        else if (edit.Provider.Equals("NBG / NSP προς επιβεβαίωση", StringComparison.OrdinalIgnoreCase) &&
+                 edit.Protocol.Contains("Επιβεβαίωση NSP", StringComparison.OrdinalIgnoreCase))
+            edit.Protocol = CommonWebEcrProviderProfile.ProtocolName;
+        _lastProvider = edit.Provider;
+        ApplyProviderDefaults();
+        ApplyCommonWebEcrEndpointDefaults();
+        ApplyEdpsEnvironmentDefaults();
+        ApplyVivaEnvironmentDefaults();
+    }
+    private void NewTerminal() { vivaTerminals.Clear(); selectedVivaTerminalId = ""; edit = new(); ApplyVivaEnvironmentDefaults(); _lastProvider = edit.Provider; selectedId = 0; message = null; epayTerminals.Clear(); selectedEpayTerminalId = ""; }
+
+    private async Task FetchVivaTerminals()
+    {
+        if (!IsVivaCloud) { isError = true; message = "Επίλεξε Viva Cloud."; return; }
+        if (string.IsNullOrWhiteSpace(edit.ApiKey) || string.IsNullOrWhiteSpace(edit.ApiSecret))
+        { isError = true; message = "Συμπλήρωσε πρώτα τα Viva POS APIs Client ID και Client Secret."; return; }
+        busy = true; message = "Authentication και αναζήτηση ενεργών Viva POS…";
+        try
+        {
+            var result = await VivaService.GetLiveTerminalsAsync(edit);
+            isError = !result.Success; message = result.Message;
+            vivaTerminals = result.Terminals.ToList();
+            selectedVivaTerminalId = vivaTerminals.Count == 1 ? vivaTerminals[0].TerminalId : "";
+        }
+        finally { busy = false; }
+    }
+
+    private void UseSelectedVivaTerminal()
+    {
+        var terminal = vivaTerminals.FirstOrDefault(x => x.TerminalId == selectedVivaTerminalId);
+        if (terminal is null) { isError = true; message = "Επίλεξε τερματικό από τη λίστα."; return; }
+        edit.TerminalId = terminal.TerminalId;
+        isError = false; message = $"Επιλέχθηκε το Viva POS {terminal.TerminalId}. Πάτησε Αποθήκευση ρυθμίσεων.";
+    }
+
+    private async Task RedeemEpay()
+    {
+        if (!UsesCommonWebEcrApi) { isError = true; message = "Επίλεξε κοινό WebECR REST πρωτόκολλο."; return; }
+        // Save first so the returned API key can be persisted against a stable database record.
+        await Save();
+        if (isError || edit.Id <= 0) return;
+        busy = true; message = $"Γίνεται authentication και Redeem στο {CommonWebEcrProviderProfile.ProviderLabel(edit.Provider)} WebECR…";
+        try
+        {
+            var result = IsCommonWebEcr
+                ? await RedeemMellonAsync()
+                : await EpayService.RedeemAsync(edit);
+            isError = !result.Success; message = result.Message;
+            if (result.Success) { await LoadTerminal(edit.Id); await Refresh(); }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task FetchEpayTerminals()
+    {
+        if (!UsesCommonWebEcrApi) { isError = true; message = "Επίλεξε κοινό WebECR REST πρωτόκολλο."; return; }
+        await Save();
+        if (isError || edit.Id <= 0) return;
+        busy = true; message = "Αναζήτηση τερματικών στο WebECR…";
+        try
+        {
+            var result = IsCommonWebEcr
+                ? await FetchMellonTerminalsAsync()
+                : await EpayService.GetTerminalsAsync(edit);
+            isError = !result.Success; message = result.Message;
+            epayTerminals = result.Terminals?.ToList() ?? new();
+            selectedEpayTerminalId = epayTerminals.Count == 1 ? epayTerminals[0].BackendId : "";
+        }
+        finally { busy = false; }
+    }
+
+    private async Task<EpayWebEcrService.SetupResult> RedeemMellonAsync()
+    {
+        var result = await MellonService.RedeemAsync(edit);
+        return new(result.Success, result.Message, result.ApiKey);
+    }
+
+    private async Task<EpayWebEcrService.SetupResult> FetchMellonTerminalsAsync()
+    {
+        var result = await MellonService.GetTerminalsAsync(edit);
+        return new(result.Success, result.Message, result.ApiKey,
+            result.Terminals?.Select(t => new EpayWebEcrService.TerminalChoice(t.BackendId, t.TerminalId, t.Merchant, t.Acquirer)).ToList());
+    }
+
+    private async Task RedeemEdps()
+    {
+        if (!IsEdpsMiddlewareV6) { isError = true; message = "Επίλεξε EDPS Middleware (Chronos WebECR API v6)."; return; }
+        await Save();
+        if (isError || edit.Id <= 0) return;
+        busy = true; message = "Γίνεται authentication και Redeem στο EDPS Web API…";
+        try
+        {
+            var result = await EdpsService.RedeemAsync(edit);
+            isError = !result.Success; message = result.Message;
+            if (result.Success) { await LoadTerminal(edit.Id); await Refresh(); }
+        }
+        finally { busy = false; }
+    }
+
+    private void UseSelectedEpayTerminal()
+    {
+        var selected = epayTerminals.FirstOrDefault(x => x.BackendId == selectedEpayTerminalId);
+        if (selected is null) { isError = true; message = "Επίλεξε τερματικό από τη λίστα."; return; }
+        edit.IdUrl = selected.BackendId; // WebECR backend ID used in /terminal/{id}/txninit/
+        edit.TerminalId = selected.TerminalId; // physical POS TID
+        edit.MerchantId = selected.Merchant;
+        edit.ProviderCode = selected.Acquirer;
+        isError = false;
+        message = $"Επιλέχθηκε το POS TID {selected.TerminalId}. Το backend ID {selected.BackendId} μπήκε στο πεδίο WebECR terminal backend ID. Πάτησε Αποθήκευση ρυθμίσεων.";
+    }
+    private void ProviderChanged()
+    {
+        vivaTerminals.Clear(); selectedVivaTerminalId = "";
+        var previousDefaultNsp = IsEpayProvider(_lastProvider) ? "2" :
+            _lastProvider.Equals("EDPS", StringComparison.OrdinalIgnoreCase) ? "5" :
+            CommonWebEcrProviderProfile.ParochosNspCodeFor(_lastProvider);
+        if (!string.IsNullOrWhiteSpace(previousDefaultNsp) &&
+            string.Equals(edit.ParochosNspCode?.Trim(), previousDefaultNsp, StringComparison.Ordinal))
+            edit.ParochosNspCode = IsEpay ? "2" :
+                edit.Provider.Equals("EDPS", StringComparison.OrdinalIgnoreCase) ? "5" :
+                CommonWebEcrProviderProfile.ParochosNspCodeFor(edit.Provider) ?? "";
+        var protocols = ProtocolsFor(edit.Provider);
+        if (!protocols.Contains(edit.Protocol)) edit.Protocol = protocols[0];
+        if (IsCommonWebEcr && !string.Equals(_lastProvider, edit.Provider, StringComparison.OrdinalIgnoreCase))
+        {
+            edit.Endpoint = ""; edit.AuthEndpoint = ""; edit.RedeemEndpoint = "";
+            edit.ApiKey = ""; edit.RedeemCode = ""; edit.IdUrl = "";
+        }
+        epayTerminals.Clear(); selectedEpayTerminalId = "";
+        if (IsVivaCloud && !_lastProvider.Equals("Viva", StringComparison.OrdinalIgnoreCase))
+        {
+            edit.Endpoint = ""; edit.AuthEndpoint = ""; edit.RedeemEndpoint = "";
+            edit.ApiKey = ""; edit.ApiSecret = ""; edit.IdUrl = "";
+            edit.ProviderCode = ""; edit.ParochosNspCode = ""; edit.TerminalId = "";
+        }
+        _lastProvider = edit.Provider;
+        ApplyProviderDefaults();
+        ApplyCommonWebEcrEndpointDefaults();
+        ApplyEdpsEnvironmentDefaults();
+        ApplyVivaEnvironmentDefaults();
+    }
+
+    private void ProtocolChanged()
+    {
+        vivaTerminals.Clear(); selectedVivaTerminalId = "";
+        ApplyVivaEnvironmentDefaults();
+        ApplyProviderDefaults();
+        ApplyCommonWebEcrEndpointDefaults();
+    }
+
+    private static bool IsEpayProvider(string? provider) =>
+        provider?.Contains("ePay", StringComparison.OrdinalIgnoreCase) == true ||
+        provider?.Contains("Euronet", StringComparison.OrdinalIgnoreCase) == true;
+
+    private void EnvironmentChanged()
+    {
+        vivaTerminals.Clear(); selectedVivaTerminalId = "";
+        epayTerminals.Clear(); selectedEpayTerminalId = "";
+        if (IsCommonWebEcr) ResetMellonPairing();
+        ApplyEdpsEnvironmentDefaults();
+        ApplyVivaEnvironmentDefaults();
+    }
+
+    private void MellonEndpointsChanged()
+    {
+        if (IsCommonWebEcr && edit.UseProduction) ResetMellonPairing();
+    }
+
+    private void ResetMellonPairing()
+    {
+        edit.ApiKey = ""; edit.IdUrl = ""; edit.RedeemCode = "";
+        epayTerminals.Clear(); selectedEpayTerminalId = "";
+        isError = false;
+        message = "Άλλαξε η σύνδεση Mellon. Κάνε νέο Redeem και ανάκτηση τερματικών για το επιλεγμένο περιβάλλον.";
+    }
+
+    private void ApplyVivaEnvironmentDefaults()
+    {
+        if (!IsVivaCloud) return;
+        var demoBase = "https://demo-api.vivapayments.com/";
+        var productionBase = "https://api.vivapayments.com/";
+        var demoAuth = "https://demo-accounts.vivapayments.com/connect/token";
+        var productionAuth = "https://accounts.vivapayments.com/connect/token";
+        var oldBase = edit.UseProduction ? demoBase : productionBase;
+        var oldAuth = edit.UseProduction ? demoAuth : productionAuth;
+        var endpoint = edit.Endpoint.Trim().TrimEnd('/');
+        var isKnownDefaultEndpoint = string.IsNullOrWhiteSpace(endpoint) ||
+            endpoint == oldBase.TrimEnd('/') ||
+            endpoint.Equals("https://webecr-test.epayworldwide.com", StringComparison.OrdinalIgnoreCase);
+        if (isKnownDefaultEndpoint)
+            edit.Endpoint = edit.UseProduction ? productionBase : demoBase;
+        var auth = edit.AuthEndpoint.Trim();
+        var isKnownDefaultAuth = string.IsNullOrWhiteSpace(auth) ||
+            string.Equals(auth, oldAuth, StringComparison.OrdinalIgnoreCase) ||
+            auth.Contains("epayworldwide.com", StringComparison.OrdinalIgnoreCase);
+        if (isKnownDefaultAuth)
+            edit.AuthEndpoint = edit.UseProduction ? productionAuth : demoAuth;
+    }
+
+    private void ApplyProviderDefaults()
+    {
+        if (IsEpay && string.IsNullOrWhiteSpace(edit.ParochosNspCode))
+            edit.ParochosNspCode = "2";
+        else if (IsEdpsMiddlewareV6 && string.IsNullOrWhiteSpace(edit.ParochosNspCode))
+            edit.ParochosNspCode = "5";
+        else if (IsCommonWebEcr && string.IsNullOrWhiteSpace(edit.ParochosNspCode) && CommonWebEcrProviderProfile.ParochosNspCodeFor(edit.Provider) is { } nspCode)
+            edit.ParochosNspCode = nspCode;
+        if ((IsEpay || IsEdpsMiddlewareV6 || IsCommonWebEcr || IsVivaCloud) && edit.ProviderId <= 0)
+            edit.ProviderId = 19;
+    }
+
+    private void ApplyCommonWebEcrEndpointDefaults()
+    {
+        if (!IsCommonWebEcr) return;
+        if (IsDemoUrl(edit.Endpoint)) edit.Endpoint = "";
+        if (IsDemoUrl(edit.AuthEndpoint)) edit.AuthEndpoint = "";
+        if (IsDemoUrl(edit.RedeemEndpoint)) edit.RedeemEndpoint = "";
+    }
+
+    private static bool IsDemoUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        (uri.Host.Equals("uat.mreceipts.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.Equals("webecr-test.epayworldwide.com", StringComparison.OrdinalIgnoreCase));
+
+    private void ApplyEdpsEnvironmentDefaults()
+    {
+        if (!IsEdpsMiddlewareV6) return;
+        const string uatBaseUrl = "https://webapi-uat.ecr.novidea.gr";
+        const string productionBaseUrl = "https://webapi.ecr.novidea.gr";
+        var selectedBaseUrl = edit.UseProduction ? productionBaseUrl : uatBaseUrl;
+        var current = edit.Endpoint.Trim().TrimEnd('/');
+        var isKnownEndpoint = string.IsNullOrWhiteSpace(current) ||
+            current.StartsWith("https://webecr-test.epayworldwide.com", StringComparison.OrdinalIgnoreCase) ||
+            current.StartsWith(uatBaseUrl, StringComparison.OrdinalIgnoreCase) ||
+            current.StartsWith(productionBaseUrl, StringComparison.OrdinalIgnoreCase) ||
+            current.StartsWith("http://localhost:8080", StringComparison.OrdinalIgnoreCase);
+        if (isKnownEndpoint)
+            edit.Endpoint = selectedBaseUrl + "/";
+        if (string.IsNullOrWhiteSpace(edit.ParochosNspCode)) edit.ParochosNspCode = "5";
+        if (string.IsNullOrWhiteSpace(edit.ProviderCode)) edit.ProviderCode = "127";
+        if (edit.TimeoutSeconds == 60) edit.TimeoutSeconds = 180;
+        if (string.IsNullOrWhiteSpace(edit.AuthEndpoint) ||
+            edit.AuthEndpoint.StartsWith("https://webecr", StringComparison.OrdinalIgnoreCase) ||
+            edit.AuthEndpoint.StartsWith("https://webapi", StringComparison.OrdinalIgnoreCase) ||
+            edit.AuthEndpoint.StartsWith("http://localhost:8080", StringComparison.OrdinalIgnoreCase))
+            edit.AuthEndpoint = selectedBaseUrl + "/token";
+        if (string.IsNullOrWhiteSpace(edit.RedeemEndpoint) ||
+            edit.RedeemEndpoint.StartsWith("https://webecr", StringComparison.OrdinalIgnoreCase) ||
+            edit.RedeemEndpoint.StartsWith("https://webapi", StringComparison.OrdinalIgnoreCase) ||
+            edit.RedeemEndpoint.StartsWith("http://localhost:8080", StringComparison.OrdinalIgnoreCase))
+            edit.RedeemEndpoint = selectedBaseUrl + "/authorization/redeem";
+    }
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(edit.Name) || string.IsNullOrWhiteSpace(edit.Provider) || string.IsNullOrWhiteSpace(edit.Protocol))
+        { isError = true; message = "Συμπλήρωσε όνομα, πάροχο και πρωτόκολλο."; return; }
+        ApplyProviderDefaults();
+        ApplyCommonWebEcrEndpointDefaults();
+        if (IsEpay && !string.Equals(edit.ParochosNspCode.Trim(), "2", StringComparison.Ordinal))
+        { isError = true; message = "Για ePay το Parochos NSP Code είναι 2. Διόρθωσέ το στην εγγραφή του POS."; return; }
+        if (IsEdpsMiddlewareV6 && !string.Equals(edit.ParochosNspCode.Trim(), "5", StringComparison.Ordinal))
+        { isError = true; message = "Για EDPS WebECR API v6 το Parochos NSP Code είναι 5. Διόρθωσέ το στην εγγραφή του POS."; return; }
+        if (IsVivaCloud && string.IsNullOrWhiteSpace(edit.ParochosNspCode))
+        { isError = true; message = "Συμπλήρωσε το Parochos NSP Code που χρησιμοποιεί η δοκιμασμένη σύνδεσή σου Viva."; return; }
+        if ((IsEpay || IsEdpsMiddlewareV6 || IsCommonWebEcr || IsVivaCloud) && edit.ProviderId <= 0)
+        { isError = true; message = "Το ProviderId υπογραφής Parochos πρέπει να είναι θετικός ακέραιος (συνήθως 19)."; return; }
+        if (IsCommonWebEcr && !MellonConnectionSettings.TryResolve(edit, out _, out var mellonError))
+        { isError = true; message = mellonError; return; }
+        if (edit.Port < 0 || edit.Port > 65535 || edit.TimeoutSeconds < 1 || edit.TimeoutSeconds > 600)
+        { isError = true; message = "Η θύρα πρέπει να είναι 0–65535 και το timeout 1–600 δευτερόλεπτα."; return; }
+        using var db = await DbFactory.CreateDbContextAsync();
+        if (edit.Id == 0) { edit.UpdatedAt = DateTime.UtcNow; db.BankPosTerminalSettings.Add(edit); }
+        else { var existing = await db.BankPosTerminalSettings.FindAsync(edit.Id); if (existing is null) { isError = true; message = "Η ρύθμιση δεν βρέθηκε."; return; } db.Entry(existing).CurrentValues.SetValues(edit); existing.UpdatedAt = DateTime.UtcNow; }
+        await db.SaveChangesAsync();
+        selectedId = edit.Id; isError = false; message = "Οι ρυθμίσεις αποθηκεύτηκαν. Δεν εκτελέστηκε συναλλαγή POS.";
+        await Refresh();
+    }
+    private async Task Delete()
+    {
+        if (edit.Id == 0) return;
+        using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.BankPosTerminalSettings.FindAsync(edit.Id);
+        if (existing is not null) { db.BankPosTerminalSettings.Remove(existing); await db.SaveChangesAsync(); }
+        NewTerminal(); await Refresh(); isError = false; message = "Η ρύθμιση τερματικού διαγράφηκε.";
+    }
+}

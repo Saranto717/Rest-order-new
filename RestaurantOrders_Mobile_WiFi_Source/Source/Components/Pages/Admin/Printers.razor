@@ -1,0 +1,173 @@
+@page "/admin/printers"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject PrinterService PrinterSvc
+
+<h2>Εκτυπωτές</h2>
+<p class="hint">
+    Δικτυακοί θερμικοί εκτυπωτές ESC/POS. Βρες την IP από τις ρυθμίσεις δικτύου του εκτυπωτή
+    (τύπωσε "network status" από τον εκτυπωτή αν δεν την ξέρεις). Θύρα συνήθως 9100.
+    "Αντίγραφα": πόσες φορές τυπώνει κάθε δελτίο (π.χ. 2 για διπλότυπο).
+    <b>Αν βγαίνουν λάθος ελληνικά</b> (περίεργα σύμβολα), δοκίμασε να αλλάξεις το "Codepage"
+    στην άλλη επιλογή και ξανακάνε δοκιμαστική εκτύπωση.
+</p>
+
+<div class="admin-form">
+    <input @bind="newName" placeholder="Όνομα (π.χ. Κουζίνα)" />
+    <input @bind="newIp" placeholder="IP διεύθυνση" />
+    <input @bind="newPort" placeholder="Θύρα" style="width:70px" />
+    <input @bind="newCopies" placeholder="Αντίγραφα" style="width:70px" />
+    <select @bind="newCodepage">
+        <option value="PC737">Codepage: PC737</option>
+        <option value="1253">Codepage: Windows-1253</option>
+    </select>
+    <input @bind="newWidth" placeholder="Χαρακτήρες/γραμμή" style="width:110px" />
+    <button @onclick="Add">Προσθήκη</button>
+</div>
+
+<table class="admin-table">
+    <thead><tr><th>Όνομα</th><th>IP</th><th>Θύρα</th><th>Αντίγραφα</th><th>Codepage</th><th>Χαρ/γραμμή</th><th></th><th></th></tr></thead>
+    <tbody>
+        @foreach (var p in items)
+        {
+            <tr>
+                <td>@p.Name</td>
+                <td><input value="@p.IpAddress" @onchange="e => UpdateIpAddress(p, e)" aria-label="IP διεύθυνση εκτυπωτή @p.Name" style="width:135px" /></td>
+                <td>@p.Port</td>
+                <td><input value="@p.Copies" @onchange="e => UpdateField(p, e, (ent, v) => ent.Copies = ParseIntOr(v, 1))" style="width:50px" /></td>
+                <td>
+                    <select @onchange="e => UpdateCodepage(p, e)">
+                        <option value="PC737" selected="@(p.Codepage == "PC737")">PC737</option>
+                        <option value="1253" selected="@(p.Codepage == "1253")">Windows-1253</option>
+                    </select>
+                </td>
+                <td><input value="@p.PaperWidthChars" @onchange="e => UpdateField(p, e, (ent, v) => ent.PaperWidthChars = ParseIntOr(v, 42))" style="width:60px" /></td>
+                <td><button @onclick="() => TestPrint(p)">Δοκιμαστική εκτύπωση</button></td>
+                <td><button class="danger" @onclick="() => Delete(p)">Διαγραφή</button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="status">@statusMessage</p>
+}
+
+@code {
+    private List<PrinterStation> items = new();
+    private string newName = "", newIp = "";
+    private string newPort = "9100";
+    private string newCopies = "1";
+    private string newCodepage = "PC737";
+    private string newWidth = "42";
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.PrinterStations.OrderBy(p => p.Name).ToListAsync();
+    }
+
+    private static int ParseIntOr(string? raw, int fallback) =>
+        int.TryParse(raw, out var v) && v > 0 ? v : fallback;
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(newName) || string.IsNullOrWhiteSpace(newIp)) return;
+        if (!int.TryParse(newPort, out var port)) port = 9100;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.PrinterStations.Add(new PrinterStation
+        {
+            Name = newName.Trim(),
+            IpAddress = newIp.Trim(),
+            Port = port,
+            Copies = ParseIntOr(newCopies, 1),
+            Codepage = newCodepage,
+            PaperWidthChars = ParseIntOr(newWidth, 42),
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+        newName = ""; newIp = ""; newPort = "9100"; newCopies = "1"; newCodepage = "PC737"; newWidth = "42";
+        await Load();
+    }
+
+    private async Task UpdateField(PrinterStation p, ChangeEventArgs e, Action<PrinterStation, string?> apply)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrinterStations.FindAsync(p.Id);
+        if (entity is not null)
+        {
+            apply(entity, e.Value?.ToString());
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task UpdateIpAddress(PrinterStation p, ChangeEventArgs e)
+    {
+        var newIpAddress = e.Value?.ToString()?.Trim();
+
+        if (string.IsNullOrWhiteSpace(newIpAddress))
+        {
+            statusMessage = $"Η IP του εκτυπωτή '{p.Name}' δεν μπορεί να είναι κενή.";
+            await Load();
+            return;
+        }
+
+        if (!System.Net.IPAddress.TryParse(newIpAddress, out _))
+        {
+            statusMessage = $"Η IP '{newIpAddress}' δεν είναι έγκυρη. Δεν έγινε αλλαγή.";
+            await Load();
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrinterStations.FindAsync(p.Id);
+        if (entity is not null)
+        {
+            entity.IpAddress = newIpAddress;
+            await db.SaveChangesAsync();
+            statusMessage = $"Η IP του εκτυπωτή '{entity.Name}' ενημερώθηκε σε {entity.IpAddress}.";
+        }
+
+        await Load();
+    }
+
+    private async Task UpdateCodepage(PrinterStation p, ChangeEventArgs e)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrinterStations.FindAsync(p.Id);
+        if (entity is not null)
+        {
+            entity.Codepage = e.Value?.ToString() ?? "PC737";
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task TestPrint(PrinterStation p)
+    {
+        var ok = await PrinterSvc.PrintTicketAsync(p, "ΔΟΚΙΜΗ", "Σύστημα",
+            new[] { ("Δοκιμαστικό είδος", 1, 1.00m, (string?)"Αυτό είναι τεστ εκτύπωσης", 24m) });
+        statusMessage = ok
+            ? $"Η δοκιμαστική εκτύπωση στάλθηκε στον εκτυπωτή '{p.Name}'. Βγήκαν σωστά τα ελληνικά και το €;"
+            : $"Απέτυχε η σύνδεση με τον εκτυπωτή '{p.Name}'. Έλεγξε IP/θύρα/δίκτυο.";
+    }
+
+    private async Task Delete(PrinterStation p)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrinterStations.FindAsync(p.Id);
+        if (entity is not null)
+        {
+            db.PrinterStations.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+}

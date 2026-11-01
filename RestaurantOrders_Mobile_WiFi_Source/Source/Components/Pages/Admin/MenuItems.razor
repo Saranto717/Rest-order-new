@@ -1,0 +1,420 @@
+@page "/admin/menu"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h2>Κατάλογος (Είδη)</h2>
+<p class="hint">Για αλλαγή ονόματος ή τιμής, πάτησε «Επεξεργασία» στη γραμμή του είδους. Οι κατηγορίες που σημειώνονται ως ανενεργές δεν εμφανίζονται κατά τη λήψη παραγγελίας.</p>
+
+<h3>Προσθήκη ενός είδους</h3>
+<div class="admin-form">
+    <input @bind="newName" placeholder="Όνομα είδους" />
+    <input @bind="newPrice" placeholder="Τιμή" />
+    <select @bind="newCategoryId">
+        <option value="0">-- Χωρίς κατηγορία (όρισε αργότερα) --</option>
+        @foreach (var c in categories)
+        {
+            <option value="@c.Id">@(c.IsActive ? c.Name : $"{c.Name} (ανενεργή)")</option>
+        }
+    </select>
+    <button @onclick="Add">Προσθήκη</button>
+</div>
+
+<h3>Μαζική προσθήκη πολλών ειδών</h3>
+<p class="hint">
+    Γράψε ένα είδος ανά γραμμή. Προαιρετικά βάλε την τιμή μετά από ; (π.χ. <code>Freddo Espresso;2.50</code>).
+    Χωρίς τιμή, μπαίνει 0 — μπορείς να τη διορθώσεις μετά. Η κατηγορία (αν διαλέξεις) εφαρμόζεται σε όλα τα είδη της λίστας.
+</p>
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>Κατηγορία (προαιρετικό, εφαρμόζεται σε όλα)</label>
+        <select @bind="bulkAddCategoryId">
+            <option value="0">-- Χωρίς κατηγορία (όρισε αργότερα) --</option>
+            @foreach (var c in categories)
+            {
+                <option value="@c.Id">@(c.IsActive ? c.Name : $"{c.Name} (ανενεργή)")</option>
+            }
+        </select>
+    </div>
+    <div class="form-row">
+        <label>Είδη (ένα ανά γραμμή)</label>
+        <textarea @bind="bulkAddText" rows="8" placeholder="Freddo Espresso;2.50&#10;Cappuccino;3.00&#10;Σκέτος καφές"></textarea>
+    </div>
+    <button @onclick="BulkAdd">Μαζική προσθήκη</button>
+</div>
+
+@if (!string.IsNullOrEmpty(bulkAddMessage))
+{
+    <p class="success">@bulkAddMessage</p>
+}
+
+<h3>Εισαγωγή από Excel</h3>
+<p class="hint">
+    Ανέβασε ένα αρχείο <code>.xlsx</code> με στήλες (επικεφαλίδες στην πρώτη γραμμή):
+    <b>Περιγραφή</b>, <b>Κατηγορία</b>, <b>Τιμή</b>. Αν μια κατηγορία δεν υπάρχει ήδη, θα δημιουργηθεί
+    αυτόματα. Η σειρά των στηλών δεν έχει σημασία.
+</p>
+<div class="admin-form">
+    <InputFile OnChange="HandleExcelUpload" accept=".xlsx" />
+</div>
+@if (isImportingExcel)
+{
+    <p class="hint">Εισαγωγή σε εξέλιξη...</p>
+}
+@if (!string.IsNullOrEmpty(excelImportMessage))
+{
+    <p class="success">@excelImportMessage</p>
+}
+
+<h3>Όλα τα είδη</h3>
+
+@if (items.Count > 0)
+{
+    <div class="bulk-bar">
+        <label><input type="checkbox" checked="@allSelected" @onchange="ToggleSelectAll" /> Επιλογή όλων</label>
+        <span>@selectedIds.Count επιλεγμένα</span>
+        <select @bind="bulkCategoryId">
+            <option value="0">-- Χωρίς κατηγορία --</option>
+            @foreach (var c in categories)
+            {
+                <option value="@c.Id">@(c.IsActive ? c.Name : $"{c.Name} (ανενεργή)")</option>
+            }
+        </select>
+        <button @onclick="ApplyBulkCategory" disabled="@(selectedIds.Count == 0)">Ανάθεση κατηγορίας στα επιλεγμένα</button>
+        <button class="danger" @onclick="DeleteSelected" disabled="@(selectedIds.Count == 0)">Διαγραφή επιλεγμένων</button>
+    </div>
+}
+
+<table class="admin-table">
+    <thead><tr><th></th><th>Είδος</th><th>Κατηγορία</th><th>Τιμή</th><th>ΦΠΑ %</th><th>Διαθέσιμο</th><th></th></tr></thead>
+    <tbody>
+        @foreach (var i in items)
+        {
+            @if (editingId == i.Id)
+            {
+                <tr>
+                    <td></td>
+                    <td><input @bind="editName" /></td>
+                    <td>
+                        <select @bind="editCategoryId">
+                            <option value="0">-- Χωρίς κατηγορία --</option>
+                            @foreach (var c in categories)
+                            {
+                                <option value="@c.Id">@(c.IsActive ? c.Name : $"{c.Name} (ανενεργή)")</option>
+                            }
+                        </select>
+                    </td>
+                    <td><input @bind="editPrice" style="width:70px" /></td>
+                    <td></td>
+                    <td><input type="checkbox" checked="@i.IsAvailable" @onchange="e => ToggleAvailable(i, e)" /></td>
+                    <td>
+                        <button @onclick="() => SaveEdit(i)">Αποθήκευση</button>
+                        <button @onclick="CancelEdit">Άκυρο</button>
+                    </td>
+                </tr>
+            }
+            else
+            {
+                <tr>
+                    <td><input type="checkbox" checked="@selectedIds.Contains(i.Id)" @onchange="e => ToggleSelect(i.Id, e)" /></td>
+                    <td>@i.Name</td>
+                    <td>@(i.MenuCategory?.Name ?? "— χωρίς κατηγορία —")</td>
+                    <td>€@i.Price.ToString("0.00")</td>
+                    <td>
+                        <input value="@i.VatPercentOverride?.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="e => UpdateVatOverride(i, e)"
+                               placeholder="@(i.MenuCategory?.VatPercent.ToString() ?? "24")"
+                               style="width:55px" />
+                    </td>
+                    <td><input type="checkbox" checked="@i.IsAvailable" @onchange="e => ToggleAvailable(i, e)" /></td>
+                    <td>
+                        <button @onclick="() => StartEdit(i)">Επεξεργασία</button>
+                        <button class="danger" @onclick="() => Delete(i)">Διαγραφή</button>
+                    </td>
+                </tr>
+            }
+        }
+    </tbody>
+</table>
+<p class="hint">Άδειο πεδίο ΦΠΑ = κληρονομεί το ΦΠΑ της κατηγορίας του (φαίνεται σαν placeholder). Συμπλήρωσέ το μόνο αν αυτό το συγκεκριμένο είδος έχει διαφορετικό συντελεστή.</p>
+
+@code {
+    private List<MenuItem> items = new();
+    private List<MenuCategory> categories = new();
+    private string newName = "";
+    private string newPrice = "";
+    private int newCategoryId = 0;
+
+    private int bulkAddCategoryId = 0;
+    private string bulkAddText = "";
+    private string? bulkAddMessage;
+
+    private bool isImportingExcel;
+    private string? excelImportMessage;
+
+    private int bulkCategoryId = 0;
+    private HashSet<int> selectedIds = new();
+    private bool allSelected => items.Count > 0 && selectedIds.Count == items.Count;
+
+    private int? editingId;
+    private string editName = "";
+    private string editPrice = "";
+    private int editCategoryId = 0;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.MenuItems.Include(i => i.MenuCategory).OrderBy(i => i.Name).ToListAsync();
+        categories = await db.MenuCategories.OrderBy(c => c.Name).ToListAsync();
+        selectedIds.RemoveWhere(id => items.All(i => i.Id != id));
+    }
+
+    private static decimal ParsePrice(string raw)
+    {
+        decimal.TryParse(raw.Replace(",", "."),
+            System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var price);
+        return price;
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        var price = ParsePrice(newPrice);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.MenuItems.Add(new MenuItem
+        {
+            Name = newName.Trim(),
+            Price = price,
+            MenuCategoryId = newCategoryId == 0 ? null : newCategoryId,
+            IsAvailable = true
+        });
+        await db.SaveChangesAsync();
+        newName = ""; newPrice = ""; newCategoryId = 0;
+        await Load();
+    }
+
+    private async Task BulkAdd()
+    {
+        bulkAddMessage = null;
+        var lines = bulkAddText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0) return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var count = 0;
+        foreach (var line in lines)
+        {
+            var parts = line.Split(';', 2);
+            var name = parts[0].Trim();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            var price = parts.Length > 1 ? ParsePrice(parts[1]) : 0;
+
+            db.MenuItems.Add(new MenuItem
+            {
+                Name = name,
+                Price = price,
+                MenuCategoryId = bulkAddCategoryId == 0 ? null : bulkAddCategoryId,
+                IsAvailable = true
+            });
+            count++;
+        }
+        await db.SaveChangesAsync();
+
+        bulkAddMessage = $"Προστέθηκαν {count} είδη.";
+        bulkAddText = "";
+        await Load();
+    }
+
+    private async Task HandleExcelUpload(InputFileChangeEventArgs e)
+    {
+        excelImportMessage = null;
+        isImportingExcel = true;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            if (file is null) return;
+
+            using var stream = file.OpenReadStream(maxAllowedSize: 15 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            List<Dictionary<string, string>> rows;
+            try
+            {
+                rows = ExcelImportService.ReadRows(ms);
+            }
+            catch (Exception ex)
+            {
+                excelImportMessage = $"Σφάλμα ανάγνωσης αρχείου: {ex.Message}";
+                return;
+            }
+
+            using var db = await DbFactory.CreateDbContextAsync();
+            var existingCategories = await db.MenuCategories.ToListAsync();
+            var count = 0;
+
+            foreach (var row in rows)
+            {
+                var name = ExcelImportService.GetField(row, "Περιγραφή", "Περιγραφη", "Όνομα", "Ονομα", "Name", "Description");
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                var categoryName = ExcelImportService.GetField(row, "Κατηγορία", "Κατηγορια", "Category");
+                var priceRaw = ExcelImportService.GetField(row, "Τιμή", "Τιμη", "Price");
+                var price = ParsePrice(priceRaw);
+
+                int? categoryId = null;
+                if (!string.IsNullOrWhiteSpace(categoryName))
+                {
+                    var cat = existingCategories.FirstOrDefault(c =>
+                        string.Equals(c.Name, categoryName.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (cat is null)
+                    {
+                        cat = new MenuCategory { Name = categoryName.Trim() };
+                        db.MenuCategories.Add(cat);
+                        await db.SaveChangesAsync();
+                        existingCategories.Add(cat);
+                    }
+                    categoryId = cat.Id;
+                }
+
+                db.MenuItems.Add(new MenuItem
+                {
+                    Name = name.Trim(),
+                    Price = price,
+                    MenuCategoryId = categoryId,
+                    IsAvailable = true
+                });
+                count++;
+            }
+
+            await db.SaveChangesAsync();
+            excelImportMessage = $"Εισήχθησαν {count} είδη από το αρχείο.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            excelImportMessage = $"Απέτυχε η εισαγωγή: {ex.Message}";
+        }
+        finally
+        {
+            isImportingExcel = false;
+        }
+    }
+
+    private void StartEdit(MenuItem i)
+    {
+        editingId = i.Id;
+        editName = i.Name;
+        editPrice = i.Price.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        editCategoryId = i.MenuCategoryId ?? 0;
+    }
+
+    private void CancelEdit()
+    {
+        editingId = null;
+    }
+
+    private async Task SaveEdit(MenuItem i)
+    {
+        if (string.IsNullOrWhiteSpace(editName)) return;
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuItems.FindAsync(i.Id);
+        if (entity is not null)
+        {
+            entity.Name = editName.Trim();
+            entity.Price = ParsePrice(editPrice);
+            entity.MenuCategoryId = editCategoryId == 0 ? null : editCategoryId;
+            await db.SaveChangesAsync();
+        }
+
+        editingId = null;
+        await Load();
+    }
+
+    private void ToggleSelect(int id, ChangeEventArgs e)
+    {
+        if ((bool)(e.Value ?? false)) selectedIds.Add(id);
+        else selectedIds.Remove(id);
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        if ((bool)(e.Value ?? false)) selectedIds = items.Select(i => i.Id).ToHashSet();
+        else selectedIds.Clear();
+    }
+
+    private async Task ApplyBulkCategory()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var toUpdate = await db.MenuItems.Where(i => selectedIds.Contains(i.Id)).ToListAsync();
+        foreach (var i in toUpdate)
+        {
+            i.MenuCategoryId = bulkCategoryId == 0 ? null : bulkCategoryId;
+        }
+        await db.SaveChangesAsync();
+        await Load();
+    }
+
+    private async Task DeleteSelected()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var toDelete = await db.MenuItems.Where(i => selectedIds.Contains(i.Id)).ToListAsync();
+        db.MenuItems.RemoveRange(toDelete);
+        await db.SaveChangesAsync();
+        selectedIds.Clear();
+        await Load();
+    }
+
+    private async Task UpdateVatOverride(MenuItem i, ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString()?.Trim();
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuItems.FindAsync(i.Id);
+        if (entity is not null)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                entity.VatPercentOverride = null;
+            }
+            else if (decimal.TryParse(raw.Replace(",", "."), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var vat))
+            {
+                entity.VatPercentOverride = vat;
+            }
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task ToggleAvailable(MenuItem i, ChangeEventArgs e)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuItems.FindAsync(i.Id);
+        if (entity is not null)
+        {
+            entity.IsAvailable = (bool)(e.Value ?? false);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task Delete(MenuItem i)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MenuItems.FindAsync(i.Id);
+        if (entity is not null)
+        {
+            db.MenuItems.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+}

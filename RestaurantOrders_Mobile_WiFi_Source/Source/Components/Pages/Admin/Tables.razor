@@ -1,0 +1,189 @@
+@page "/admin/tables"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h2>Περιοχές</h2>
+<p class="hint">Φτιάξε "καρτέλες περιοχής" για την οθόνη επιλογής τραπεζιού του σερβιτόρου
+(π.χ. "Σάλα", "Πλατεία"). Δεν είναι υποχρεωτικό — αν δεν φτιάξεις καμία, θα φαίνονται απλά όλα τα τραπέζια μαζί.</p>
+
+<div class="admin-form">
+    <input @bind="newAreaName" placeholder="π.χ. Σάλα" />
+    <button @onclick="AddArea">Προσθήκη περιοχής</button>
+</div>
+
+<div class="area-chip-list">
+    @foreach (var a in areas)
+    {
+        <span class="area-chip">@a.Name <button @onclick="() => DeleteArea(a)">✕</button></span>
+    }
+</div>
+
+<h2>Τραπέζια</h2>
+<p class="hint">Σύρε (drag) τις κάρτες για να αλλάξεις τη σειρά εμφάνισής τους στον σερβιτόρο.</p>
+
+<div class="admin-form">
+    <input @bind="newName" placeholder="π.χ. Τραπέζι 1" />
+    <select @bind="newAreaId">
+        <option value="0">-- Χωρίς περιοχή --</option>
+        @foreach (var a in areas)
+        {
+            <option value="@a.Id">@a.Name</option>
+        }
+    </select>
+    <button @onclick="Add">Προσθήκη</button>
+</div>
+
+<div class="table-card-list">
+    @foreach (var t in tables)
+    {
+        <div class="table-card @(draggedId == t.Id ? "dragging" : "")"
+             draggable="true"
+             @ondragstart="() => draggedId = t.Id"
+             @ondragover="@(() => { })" @ondragover:preventDefault="true"
+             @ondrop="() => Drop(t.Id)">
+            <span class="drag-handle">☰</span>
+            <span class="tname">@t.Name</span>
+
+            <select @onchange="e => ChangeArea(t, e)">
+                <option value="" selected="@(t.TableAreaId == null)">-- Χωρίς περιοχή --</option>
+                @foreach (var a in areas)
+                {
+                    <option value="@a.Id" selected="@(t.TableAreaId == a.Id)">@a.Name</option>
+                }
+            </select>
+
+            <label class="inline-check"><input type="checkbox" checked="@t.IsActive" @onchange="e => ToggleActive(t, e)" /> Ενεργό</label>
+
+            <button class="danger" @onclick="() => Delete(t)">Διαγραφή</button>
+        </div>
+    }
+</div>
+
+@code {
+    private List<RestaurantTable> tables = new();
+    private List<TableArea> areas = new();
+    private string newName = "";
+    private int newAreaId = 0;
+    private string newAreaName = "";
+    private int? draggedId;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        tables = await db.Tables.OrderBy(t => t.SortOrder).ThenBy(t => t.Name).ToListAsync();
+        areas = await db.TableAreas.OrderBy(a => a.Name).ToListAsync();
+    }
+
+    private async Task AddArea()
+    {
+        if (string.IsNullOrWhiteSpace(newAreaName)) return;
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.TableAreas.Add(new TableArea { Name = newAreaName.Trim() });
+        await db.SaveChangesAsync();
+        newAreaName = "";
+        await Load();
+    }
+
+    private async Task DeleteArea(TableArea a)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.TableAreas.FindAsync(a.Id);
+        if (entity is not null)
+        {
+            db.TableAreas.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        using var db = await DbFactory.CreateDbContextAsync();
+        var maxOrder = db.Tables.Any() ? db.Tables.Max(t => t.SortOrder) : 0;
+        db.Tables.Add(new RestaurantTable
+        {
+            Name = newName.Trim(),
+            IsActive = true,
+            TableAreaId = newAreaId == 0 ? null : newAreaId,
+            SortOrder = maxOrder + 1
+        });
+        await db.SaveChangesAsync();
+        newName = ""; newAreaId = 0;
+        await Load();
+    }
+
+    private async Task ChangeArea(RestaurantTable t, ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        int? areaId = string.IsNullOrEmpty(val) ? null : int.Parse(val);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(t.Id);
+        if (entity is not null)
+        {
+            entity.TableAreaId = areaId;
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task ToggleActive(RestaurantTable t, ChangeEventArgs e)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(t.Id);
+        if (entity is not null)
+        {
+            entity.IsActive = (bool)(e.Value ?? false);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task Drop(int targetId)
+    {
+        if (draggedId is null || draggedId == targetId)
+        {
+            draggedId = null;
+            return;
+        }
+
+        var draggedIndex = tables.FindIndex(t => t.Id == draggedId);
+        var targetIndex = tables.FindIndex(t => t.Id == targetId);
+        if (draggedIndex < 0 || targetIndex < 0)
+        {
+            draggedId = null;
+            return;
+        }
+
+        var item = tables[draggedIndex];
+        tables.RemoveAt(draggedIndex);
+        tables.Insert(targetIndex, item);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        for (var i = 0; i < tables.Count; i++)
+        {
+            var entity = await db.Tables.FindAsync(tables[i].Id);
+            if (entity is not null) entity.SortOrder = i;
+        }
+        await db.SaveChangesAsync();
+
+        draggedId = null;
+        await Load();
+    }
+
+    private async Task Delete(RestaurantTable t)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(t.Id);
+        if (entity is not null)
+        {
+            db.Tables.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+}

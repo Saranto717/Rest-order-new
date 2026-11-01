@@ -1,0 +1,136 @@
+@page "/admin/floorplan"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IJSRuntime JS
+
+<h2>Κάτοψη Μαγαζιού</h2>
+<p class="hint">
+    Για νέο τραπέζι: πάτα το όνομά του στη λίστα (φωτίζεται), μετά πάτα πάνω στην κάτοψη
+    εκεί που θέλεις να μπει. Για μετακίνηση ήδη τοποθετημένου τραπεζιού: πιάσε το με το
+    ποντίκι (ή το δάχτυλο) πάνω στην κάτοψη και σύρε το ελεύθερα όπου θέλεις.
+</p>
+
+<div class="floorplan-layout">
+    <div class="floorplan-sidebar">
+        <h4>Τραπέζια</h4>
+        @foreach (var t in tables)
+        {
+            <button class="table-pick-btn @(selectedForPlacementId == t.Id ? "selected" : "") @(t.PosX is not null ? "placed" : "")"
+                    @key="t.Id"
+                    @onclick="() => SelectForPlacement(t.Id)">
+                @t.Name @(t.PosX is null ? " (χωρίς θέση)" : "")
+            </button>
+        }
+        @if (selectedForPlacementId is not null)
+        {
+            <p class="hint">Πάτα στην κάτοψη για να τοποθετήσεις το "@tables.First(t => t.Id == selectedForPlacementId).Name".</p>
+        }
+    </div>
+
+    <div class="floorplan-canvas-wrap">
+        <div class="floorplan-canvas" @ref="canvasRef" @onclick="PlaceOnCanvas">
+            @foreach (var t in tables.Where(t => t.PosX is not null && t.PosY is not null))
+            {
+                <div class="floor-table" @key="t.Id" data-table-id="@t.Id" style="left:@(t.PosX)%; top:@(t.PosY)%;">
+                    @t.Name
+                    <button type="button" class="floor-table-remove" title="Αφαίρεση από την κάτοψη"
+                            @onclick="() => Unplace(t)" @onclick:stopPropagation="true">✕</button>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private const double CanvasWidthPx = 900;
+    private const double CanvasHeightPx = 500;
+
+    private List<RestaurantTable> tables = new();
+    private int? selectedForPlacementId;
+    private ElementReference canvasRef;
+    private DotNetObjectReference<Floorplan>? dotNetRef;
+    private bool jsInitDone;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!jsInitDone)
+        {
+            dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("initFloorplanDrag", canvasRef, dotNetRef);
+            jsInitDone = true;
+        }
+    }
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        tables = await db.Tables.OrderBy(t => t.SortOrder).ThenBy(t => t.Name).ToListAsync();
+    }
+
+    private void SelectForPlacement(int id)
+    {
+        selectedForPlacementId = selectedForPlacementId == id ? null : id;
+    }
+
+    private async Task PlaceOnCanvas(MouseEventArgs e)
+    {
+        if (selectedForPlacementId is null) return;
+
+        var xPercent = Math.Clamp(e.OffsetX / CanvasWidthPx * 100, 0, 100);
+        var yPercent = Math.Clamp(e.OffsetY / CanvasHeightPx * 100, 0, 100);
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(selectedForPlacementId.Value);
+        if (entity is not null)
+        {
+            entity.PosX = xPercent;
+            entity.PosY = yPercent;
+            await db.SaveChangesAsync();
+        }
+
+        selectedForPlacementId = null;
+        await Load();
+    }
+
+    /// <summary>Καλείται από το JavaScript όταν ο χρήστης αφήνει ένα τραπέζι μετά από σύρσιμο.</summary>
+    [JSInvokable]
+    public async Task SavePosition(int tableId, double xPercent, double yPercent)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(tableId);
+        if (entity is not null)
+        {
+            entity.PosX = Math.Clamp(xPercent, 0, 100);
+            entity.PosY = Math.Clamp(yPercent, 0, 100);
+            await db.SaveChangesAsync();
+        }
+
+        await InvokeAsync(async () =>
+        {
+            await Load();
+            StateHasChanged();
+        });
+    }
+
+    private async Task Unplace(RestaurantTable t)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Tables.FindAsync(t.Id);
+        if (entity is not null)
+        {
+            entity.PosX = null;
+            entity.PosY = null;
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    public void Dispose()
+    {
+        dotNetRef?.Dispose();
+    }
+}

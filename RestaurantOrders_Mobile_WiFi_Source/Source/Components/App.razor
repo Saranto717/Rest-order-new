@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1f2a44" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="RestaurantOrders" />
+    <base href="/" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <title>Παραγγελιοληψία</title>
+    <link rel="stylesheet" href="/app.css?v=20261016-mobile-wifi-v1" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <div id="components-reconnect-modal" class="ro-reconnect-modal" aria-live="polite">
+        <div class="ro-reconnect-card">
+            <strong>Η σύνδεση με το ταμείο διακόπηκε</strong>
+            <p>Προσπαθούμε να συνδεθούμε ξανά…</p>
+            <div class="components-reconnect-show">Επανασύνδεση…</div>
+            <div class="components-reconnect-failed">Δεν ήταν δυνατή η επανασύνδεση.</div>
+            <div class="components-reconnect-rejected">Η σύνδεση έληξε.</div>
+            <button type="button" onclick="location.reload()">Επαναφόρτωση εφαρμογής</button>
+        </div>
+    </div>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

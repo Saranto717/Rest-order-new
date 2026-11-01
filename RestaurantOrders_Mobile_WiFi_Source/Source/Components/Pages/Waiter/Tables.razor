@@ -1,0 +1,301 @@
+@page "/waiter"
+
+@attribute [Authorize(Roles = "Waiter,Admin")]
+
+@rendermode InteractiveServer
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<style>
+    .tables-page {
+        width: 100vw;
+        max-width: 100vw;
+        min-height: calc(100dvh - 52px);
+        margin-left: calc(50% - 50vw);
+        padding: 18px;
+        box-sizing: border-box;
+        background: var(--tables-bg, #f4f6f9);
+        position: relative;
+        overflow-x: hidden;
+    }
+
+    html, body {
+        overflow-x: hidden;
+    }
+
+    .tables-context-menu {
+        position: fixed;
+        z-index: 5000;
+        width: 280px;
+        background: #fff;
+        border: 1px solid #d8dde6;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 12px 35px rgba(0,0,0,.22);
+    }
+
+        .tables-context-menu h4 {
+            margin: 0 0 12px;
+        }
+
+    .bg-field {
+        margin: 10px 0;
+    }
+
+        .bg-field label {
+            display: block;
+            font-size: .82rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .bg-field input[type=color] {
+            width: 100%;
+            height: 44px;
+            border: 1px solid #ccd2dc;
+            border-radius: 9px;
+            padding: 3px;
+            cursor: pointer;
+        }
+
+    .bg-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+        .bg-actions button {
+            flex: 1;
+            min-height: 42px;
+            border: 0;
+            border-radius: 9px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+    .bg-save {
+        background: #1f2a44;
+        color: #fff;
+    }
+
+    .bg-reset {
+        background: #eef1f5;
+        color: #263246;
+    }
+</style>
+
+<div class="tables-page" style="--tables-bg:@pageBackground" @oncontextmenu="OpenBackgroundMenu" @oncontextmenu:preventDefault="true">
+
+    <div class="waiter-topbar">
+
+        <div>
+            <h2>Επιλογή Τραπεζιού</h2>
+            <p class="hint">Πάτησε σε ένα τραπέζι για να ανοίξεις την παραγγελία.</p>
+        </div>
+
+        <AuthorizeView Roles="Admin" Context="adminCtx">
+            <a class="cashier-btn" href="/admin/cashier">🧾 Ταμείο</a>
+        </AuthorizeView>
+
+    </div>
+
+    @if (areas.Count > 0)
+    {
+        <div class="category-tabs">
+
+            <button class="cat-tab @(selectedAreaId == 0 ? "active" : "")"
+                    @onclick="() => selectedAreaId = 0">
+                Όλα τα τραπέζια
+            </button>
+
+            @foreach (var a in areas)
+            {
+                <button class="cat-tab @(selectedAreaId == a.Id ? "active" : "")"
+                        @onclick="() => selectedAreaId = a.Id">
+                    @a.Name
+                </button>
+            }
+
+        </div>
+    }
+
+    @if (showBackgroundMenu)
+    {
+        <div class="tables-context-menu" style="left:@(menuX)px; top:@(menuY)px" @onclick:stopPropagation="true">
+            <h4>🎨 Φόντο σελίδας</h4>
+            <div class="bg-field">
+                <label>Χρώμα φόντου</label>
+                <input type="color" @bind="editingBackground" />
+            </div>
+            <div class="bg-actions">
+                <button class="bg-reset" @onclick="ResetBackground">Επαναφορά</button>
+                <button class="bg-save" @onclick="SaveBackground">Αποθήκευση</button>
+            </div>
+        </div>
+    }
+
+    @if (PositionedTables.Any())
+    {
+        <div class="floorplan-view">
+
+            @foreach (var t in PositionedTables)
+            {
+                var total = totalsByTable.GetValueOrDefault(t.Id, 0m);
+
+                <button class="floor-table-btn"
+                        @key="t.Id"
+                        style="left:@(t.PosX)%; top:@(t.PosY)%;"
+                        @onclick="() => GoToTable(t.Id)">
+
+                    <span class="tname">@t.Name</span>
+                    <span class="tamount">
+                        @FormatTotal(total)
+                    </span>
+
+                </button>
+            }
+
+        </div>
+    }
+
+    @if (UnpositionedTables.Any())
+    {
+        @if (PositionedTables.Any())
+        {
+            <h3>Χωρίς τοποθέτηση στην κάτοψη</h3>
+        }
+
+        <div class="table-grid">
+
+            @foreach (var t in UnpositionedTables)
+            {
+                var total = totalsByTable.GetValueOrDefault(t.Id, 0m);
+
+                <button class="table-btn"
+                        @onclick="() => GoToTable(t.Id)">
+
+                    <span class="tname">@t.Name</span>
+                    <span class="tamount">
+                        @FormatTotal(total)
+                    </span>
+
+                </button>
+            }
+
+        </div>
+    }
+
+</div>
+
+@code {
+    private bool showBackgroundMenu;
+    private double menuX = 20;
+    private double menuY = 20;
+    private string pageBackground = "#f4f6f9";
+    private string editingBackground = "#f4f6f9";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", "restaurant.tables.background");
+            if (!string.IsNullOrWhiteSpace(saved))
+            {
+                pageBackground = saved;
+                editingBackground = saved;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void OpenBackgroundMenu(MouseEventArgs e)
+    {
+        menuX = Math.Min(e.ClientX, Math.Max(10, 300));
+        menuY = Math.Min(e.ClientY, Math.Max(10, 500));
+        editingBackground = pageBackground;
+        showBackgroundMenu = true;
+    }
+
+    private async Task SaveBackground()
+    {
+        pageBackground = editingBackground;
+        showBackgroundMenu = false;
+        await JS.InvokeVoidAsync("localStorage.setItem", "restaurant.tables.background", pageBackground);
+    }
+
+    private async Task ResetBackground()
+    {
+        pageBackground = "#f4f6f9";
+        editingBackground = pageBackground;
+        showBackgroundMenu = false;
+        await JS.InvokeVoidAsync("localStorage.removeItem", "restaurant.tables.background");
+    }
+
+    private List<RestaurantTable> tables = new();
+    private List<TableArea> areas = new();
+    private Dictionary<int, decimal> totalsByTable = new();
+
+    private int selectedAreaId = 0;
+
+    private IEnumerable<RestaurantTable> FilteredTables =>
+        selectedAreaId == 0
+            ? tables
+            : tables.Where(t => t.TableAreaId == selectedAreaId);
+
+    private IEnumerable<RestaurantTable> PositionedTables =>
+        FilteredTables.Where(t => t.PosX is not null && t.PosY is not null);
+
+    private IEnumerable<RestaurantTable> UnpositionedTables =>
+        FilteredTables.Where(t => t.PosX is null || t.PosY is null);
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+
+        tables = await db.Tables
+            .Where(t => t.IsActive)
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Name)
+            .ToListAsync();
+
+        areas = await db.TableAreas
+            .OrderBy(a => a.Name)
+            .ToListAsync();
+
+        var openOrders = await db.Orders
+            .Where(o => o.Status == OrderStatus.Open)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.MenuItem)
+            .ToListAsync();
+
+        // A table tile shows the unpaid balance, not the original ordered total.
+        // Only successfully issued payments reduce the remaining item quantities.
+        var openOrderIds = openOrders.Select(o => o.Id).ToList();
+        var paidQuantitiesByItem = await db.OrderPaymentItems
+            .Where(pi => pi.OrderPayment != null
+                && openOrderIds.Contains(pi.OrderPayment.OrderId)
+                && pi.OrderPayment.FiscalStatus == FiscalStatus.Issued)
+            .GroupBy(pi => pi.OrderItemId)
+            .Select(g => new { OrderItemId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+            .ToDictionaryAsync(x => x.OrderItemId, x => x.Quantity);
+
+        totalsByTable = openOrders
+            .GroupBy(o => o.RestaurantTableId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.SelectMany(o => o.Items)
+                    .Where(i => !i.IsCancelled)
+                    .Sum(i => Math.Max(0, i.Quantity - paidQuantitiesByItem.GetValueOrDefault(i.Id, 0))
+                        * ((i.MenuItem?.Price ?? 0) + i.ExtrasPrice))
+            );
+    }
+
+    private string FormatTotal(decimal total) =>
+        total > 0 ? $"€{total:0.00}" : "Ελεύθερο";
+
+    private void GoToTable(int id) =>
+        Nav.NavigateTo($"/waiter/table/{id}");
+}

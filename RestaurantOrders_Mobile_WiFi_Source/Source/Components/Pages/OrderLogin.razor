@@ -1,0 +1,154 @@
+@page "/order-login"
+@attribute [AllowAnonymous]
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<div class="userpick-wrap">
+    <h2>Ποιος παίρνει παραγγελία;</h2>
+    <p class="subtitle">Πάτησε το όνομά σου</p>
+
+    <div class="user-grid">
+        @foreach (var u in staff)
+        {
+            <button type="button" class="user-tile"
+                    data-user-id="@u.Id"
+                    data-user-name="@u.FullName"
+                    data-has-code="@(u.HasCode ? "1" : "0")">
+                <div class="avatar">@GetInitials(u.FullName)</div>
+                <div class="uname">@u.FullName</div>
+            </button>
+        }
+    </div>
+
+    @if (staff.Count == 0)
+    {
+        <p class="hint">Δεν υπάρχουν ακόμα καταχωρημένοι χρήστες.</p>
+    }
+
+    <a class="admin-link nav-button" href="/">&larr; Πίσω</a>
+</div>
+
+<div id="pinOverlay" class="pin-overlay" style="display:none">
+    <div class="pin-box">
+        <div id="pinUserName" class="pin-username"></div>
+        <div class="pin-dots">
+            <span id="dot0" class="dot"></span>
+            <span id="dot1" class="dot"></span>
+            <span id="dot2" class="dot"></span>
+            <span id="dot3" class="dot"></span>
+        </div>
+        <p id="pinErrorMsg" class="error" style="display:none">Λάθος PIN, δοκίμασε ξανά.</p>
+        <div class="numpad">
+            <button type="button" onclick="pressDigit('1')">1</button>
+            <button type="button" onclick="pressDigit('2')">2</button>
+            <button type="button" onclick="pressDigit('3')">3</button>
+            <button type="button" onclick="pressDigit('4')">4</button>
+            <button type="button" onclick="pressDigit('5')">5</button>
+            <button type="button" onclick="pressDigit('6')">6</button>
+            <button type="button" onclick="pressDigit('7')">7</button>
+            <button type="button" onclick="pressDigit('8')">8</button>
+            <button type="button" onclick="pressDigit('9')">9</button>
+            <button type="button" class="ghost" onclick="closePinOverlay()">Πίσω</button>
+            <button type="button" onclick="pressDigit('0')">0</button>
+            <button type="button" class="ghost" onclick="clearPin()">Καθαρισμός</button>
+        </div>
+    </div>
+</div>
+
+<form id="staffLoginForm" method="post" action="/api/staff-login" style="display:none">
+    <input type="hidden" name="userId" id="userIdField" />
+    <input type="hidden" name="pin" id="pinField" />
+</form>
+
+<script>
+    (function () {
+        let currentPin = '';
+
+        document.querySelectorAll('.user-tile').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = this.getAttribute('data-user-id');
+                var name = this.getAttribute('data-user-name');
+                var hasCode = this.getAttribute('data-has-code') === '1';
+                selectUser(id, name, hasCode);
+            });
+        });
+
+        window.selectUser = function (id, name, hasCode) {
+            document.getElementById('userIdField').value = id;
+
+            if (!hasCode) {
+                document.getElementById('pinField').value = '';
+                document.getElementById('staffLoginForm').submit();
+                return;
+            }
+
+            document.getElementById('pinUserName').innerText = name;
+            document.getElementById('pinErrorMsg').style.display = 'none';
+            document.getElementById('pinOverlay').style.display = 'flex';
+            currentPin = '';
+            updateDots();
+        };
+
+        window.pressDigit = function (d) {
+            if (currentPin.length >= 4) return;
+            currentPin += d;
+            updateDots();
+            if (currentPin.length === 4) {
+                document.getElementById('pinField').value = currentPin;
+                document.getElementById('staffLoginForm').submit();
+            }
+        };
+
+        window.clearPin = function () {
+            currentPin = '';
+            updateDots();
+        };
+
+        window.closePinOverlay = function () {
+            document.getElementById('pinOverlay').style.display = 'none';
+            currentPin = '';
+        };
+
+        function updateDots() {
+            for (let i = 0; i < 4; i++) {
+                document.getElementById('dot' + i).classList.toggle('filled', i < currentPin.length);
+            }
+        }
+
+        @if (ShowPinError)
+        {
+            <text>
+            var errTile = document.querySelector('.user-tile[data-user-id="@ErrorUserId"]');
+            if (errTile) {
+                selectUser(errTile.getAttribute('data-user-id'), errTile.getAttribute('data-user-name'), true);
+                document.getElementById('pinErrorMsg').style.display = 'block';
+            }
+            </text>
+        }
+    })();
+</script>
+
+@code {
+    [SupplyParameterFromQuery(Name = "pinerror")]
+    public string? PinError { get; set; }
+
+    [SupplyParameterFromQuery(Name = "uid")]
+    public int? ErrorUserId { get; set; }
+
+    private List<User> staff = new();
+    private bool ShowPinError => PinError == "1" && ErrorUserId is not null;
+    private string ErrorUserName => staff.FirstOrDefault(u => u.Id == ErrorUserId)?.FullName.Replace("'", "\\'") ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        staff = await db.Users.Where(u => u.IsActive).OrderBy(u => u.FirstName).ToListAsync();
+    }
+
+    private string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][..1].ToUpper();
+        return (parts[0][..1] + parts[^1][..1]).ToUpper();
+    }
+}

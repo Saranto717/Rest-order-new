@@ -1,0 +1,159 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h2>Χρήστες (πλήρης διαχείριση)</h2>
+<p class="hint">Για γρήγορη προσθήκη σερβιτόρου/μπάρμαν, χρησιμοποίησε το κουμπί "Προσθήκη χρηστών" στην αρχική οθόνη.
+Εδώ μπορείς επίσης να φτιάξεις άλλους λογαριασμούς Διαχειριστή, να ενεργοποιήσεις/απενεργοποιήσεις χρήστες,
+να ορίσεις νέο κωδικό, ή να διαγράψεις.</p>
+
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>Όνομα *</label>
+        <input @bind="newFirstName" placeholder="π.χ. Γιώργος" />
+    </div>
+    <div class="form-row">
+        <label>Επώνυμο</label>
+        <input @bind="newLastName" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Κωδικός</label>
+        <input @bind="newCode" type="password" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Τηλέφωνο</label>
+        <input @bind="newPhone" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Ιδιότητα</label>
+        <input @bind="newJobTitle" list="jobTitles" placeholder="π.χ. Σερβιτόρος" />
+        <datalist id="jobTitles">
+            <option value="Σερβιτόρος" />
+            <option value="Barman" />
+            <option value="Ταμίας" />
+            <option value="Μάγειρας" />
+            <option value="Βοηθός Κουζίνας" />
+        </datalist>
+    </div>
+    <div class="form-row">
+        <label>Ρόλος</label>
+        <select @bind="newRole">
+            <option value="Waiter">Προσωπικό (σερβιτόρος/μπάρμαν κ.λπ.)</option>
+            <option value="Admin">Διαχειριστής</option>
+        </select>
+    </div>
+
+    <button @onclick="Add">Προσθήκη</button>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <p class="error">@errorMessage</p>
+}
+
+<table class="admin-table">
+    <thead><tr><th>Όνομα</th><th>Ιδιότητα</th><th>Τηλέφωνο</th><th>Ρόλος</th><th>Ενεργός</th><th>Νέος κωδικός</th><th></th></tr></thead>
+    <tbody>
+        @foreach (var u in items)
+        {
+            <tr>
+                <td>@u.FullName</td>
+                <td>@(u.JobTitle ?? "-")</td>
+                <td>@(u.Phone ?? "-")</td>
+                <td>@(u.Role == Role.Admin ? "Διαχειριστής" : "Προσωπικό")</td>
+                <td><input type="checkbox" checked="@u.IsActive" @onchange="e => ToggleActive(u, e)" /></td>
+                <td>
+                    <input @bind="codeResetValues[u.Id]" placeholder="(κενό = χωρίς κωδικό)" style="width:140px" />
+                    <button @onclick="() => ResetCode(u)">Ορισμός</button>
+                </td>
+                <td><button class="danger" @onclick="() => Delete(u)">Διαγραφή</button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<User> items = new();
+    private string newFirstName = "", newLastName = "", newCode = "", newPhone = "", newJobTitle = "";
+    private string newRole = "Waiter";
+    private string? errorMessage;
+    private Dictionary<int, string> codeResetValues = new();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.Users.OrderBy(u => u.FirstName).ToListAsync();
+        foreach (var u in items)
+        {
+            if (!codeResetValues.ContainsKey(u.Id)) codeResetValues[u.Id] = "";
+        }
+    }
+
+    private async Task Add()
+    {
+        errorMessage = null;
+        if (string.IsNullOrWhiteSpace(newFirstName))
+        {
+            errorMessage = "Το Όνομα είναι υποχρεωτικό.";
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.Users.Add(new User
+        {
+            FirstName = newFirstName.Trim(),
+            LastName = string.IsNullOrWhiteSpace(newLastName) ? null : newLastName.Trim(),
+            Phone = string.IsNullOrWhiteSpace(newPhone) ? null : newPhone.Trim(),
+            JobTitle = string.IsNullOrWhiteSpace(newJobTitle) ? null : newJobTitle.Trim(),
+            CodeHash = string.IsNullOrWhiteSpace(newCode) ? null : PasswordHasher.Hash(newCode.Trim()),
+            Role = newRole == "Admin" ? Role.Admin : Role.Waiter,
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        newFirstName = ""; newLastName = ""; newCode = ""; newPhone = ""; newJobTitle = ""; newRole = "Waiter";
+        await Load();
+    }
+
+    private async Task ResetCode(User u)
+    {
+        var code = codeResetValues.GetValueOrDefault(u.Id, "").Trim();
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Users.FindAsync(u.Id);
+        if (entity is not null)
+        {
+            entity.CodeHash = string.IsNullOrEmpty(code) ? null : PasswordHasher.Hash(code);
+            await db.SaveChangesAsync();
+        }
+        codeResetValues[u.Id] = "";
+        await Load();
+    }
+
+    private async Task ToggleActive(User u, ChangeEventArgs e)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Users.FindAsync(u.Id);
+        if (entity is not null)
+        {
+            entity.IsActive = (bool)(e.Value ?? false);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+
+    private async Task Delete(User u)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Users.FindAsync(u.Id);
+        if (entity is not null)
+        {
+            db.Users.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+        await Load();
+    }
+}

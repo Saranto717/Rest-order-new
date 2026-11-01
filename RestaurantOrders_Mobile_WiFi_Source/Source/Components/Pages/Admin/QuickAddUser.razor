@@ -1,0 +1,90 @@
+@page "/admin/quick-add-user"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h2>Προσθήκη Χρήστη</h2>
+<p class="hint">Μόνο το Όνομα είναι υποχρεωτικό. Ο κωδικός χρησιμοποιείται όταν ο χρήστης
+πατάει την καρτέλα του για να μπει στο πρόγραμμα — αν τον αφήσεις κενό, ο χρήστης θα μπαίνει
+χωρίς να του ζητηθεί τίποτα.</p>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <p class="success">@successMessage</p>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <p class="error">@errorMessage</p>
+}
+
+<div class="admin-form quick-add-form">
+    <div class="form-row">
+        <label>Όνομα *</label>
+        <input @bind="firstName" placeholder="π.χ. Γιώργος" />
+    </div>
+    <div class="form-row">
+        <label>Επώνυμο</label>
+        <input @bind="lastName" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Κωδικός</label>
+        <input @bind="code" type="password" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Τηλέφωνο</label>
+        <input @bind="phone" placeholder="(προαιρετικό)" />
+    </div>
+    <div class="form-row">
+        <label>Ιδιότητα</label>
+        <input @bind="jobTitle" list="jobTitles" placeholder="π.χ. Σερβιτόρος, Barman" />
+        <datalist id="jobTitles">
+            <option value="Σερβιτόρος" />
+            <option value="Barman" />
+            <option value="Ταμίας" />
+            <option value="Μάγειρας" />
+            <option value="Βοηθός Κουζίνας" />
+        </datalist>
+    </div>
+
+    <button @onclick="AddUser">Προσθήκη Χρήστη</button>
+</div>
+
+<a href="/admin/users" class="admin-link nav-button">Πλήρης διαχείριση χρηστών &rarr;</a>
+
+@code {
+    private string firstName = "";
+    private string lastName = "";
+    private string code = "";
+    private string phone = "";
+    private string jobTitle = "";
+    private string? successMessage;
+    private string? errorMessage;
+
+    private async Task AddUser()
+    {
+        successMessage = null;
+        errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(firstName))
+        {
+            errorMessage = "Το Όνομα είναι υποχρεωτικό.";
+            return;
+        }
+
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.Users.Add(new User
+        {
+            FirstName = firstName.Trim(),
+            LastName = string.IsNullOrWhiteSpace(lastName) ? null : lastName.Trim(),
+            Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(),
+            JobTitle = string.IsNullOrWhiteSpace(jobTitle) ? null : jobTitle.Trim(),
+            CodeHash = string.IsNullOrWhiteSpace(code) ? null : PasswordHasher.Hash(code.Trim()),
+            Role = Role.Waiter,
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        successMessage = $"Ο χρήστης \"{firstName.Trim()}\" προστέθηκε.";
+        firstName = ""; lastName = ""; code = ""; phone = ""; jobTitle = "";
+    }
+}
