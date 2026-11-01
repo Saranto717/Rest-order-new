@@ -31,8 +31,44 @@ UninstallDisplayIcon={app}\RestaurantOrders.exe
 InfoBeforeFile=Customer-Guide-EL.txt
 
 [Languages]
-Name: "greek"; MessagesFile: "compiler:Languages\Greek.isl"
+Name: "greek"; MessagesFile: "compiler:Default.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[LangOptions]
+greek.LanguageName=Ελληνικά
+greek.LanguageID=$0408
+
+[Messages]
+greek.SetupWindowTitle=Εγκατάσταση - %1
+greek.ButtonBack=< &Πίσω
+greek.ButtonNext=&Επόμενο >
+greek.ButtonInstall=&Εγκατάσταση
+greek.ButtonCancel=Ά&κυρο
+greek.ButtonYes=&Ναι
+greek.ButtonNo=Ό&χι
+greek.ButtonFinish=&Τέλος
+greek.ButtonBrowse=&Αναζήτηση...
+greek.ButtonWizardBrowse=&Αναζήτηση...
+greek.WelcomeLabel1=Καλώς ήρθες στην εγκατάσταση του [name]
+greek.WelcomeLabel2=Θα εγκατασταθεί το [name/ver] στον υπολογιστή σου.%n%nΚλείσε την προηγούμενη εφαρμογή πριν συνεχίσεις.
+greek.WizardInfoBefore=Οδηγίες εγκατάστασης
+greek.InfoBeforeLabel=Διάβασε τις ακόλουθες πληροφορίες πριν συνεχίσεις.
+greek.InfoBeforeClickLabel=Πάτησε Επόμενο για να συνεχίσεις.
+greek.WizardSelectDir=Φάκελος εγκατάστασης
+greek.SelectDirDesc=Σε ποιον φάκελο θα εγκατασταθεί το [name];
+greek.SelectDirLabel3=Τα αρχεία εφαρμογής θα εγκατασταθούν στον ακόλουθο φάκελο.
+greek.SelectDirBrowseLabel=Πάτησε Επόμενο ή Αναζήτηση για διαφορετικό φάκελο.
+greek.WizardReady=Έτοιμο για εγκατάσταση
+greek.ReadyLabel1=Είναι όλα έτοιμα για την εγκατάσταση του [name].
+greek.ReadyLabel2a=Πάτησε Εγκατάσταση για να συνεχίσεις ή Πίσω για αλλαγή επιλογών.
+greek.ReadyLabel2b=Πάτησε Εγκατάσταση για να συνεχίσεις.
+greek.ReadyMemoDir=Φάκελος εγκατάστασης:
+greek.WizardPreparing=Προετοιμασία εγκατάστασης
+greek.WizardInstalling=Εγκατάσταση
+greek.InstallingLabel=Περίμενε όσο εγκαθίσταται το [name].
+greek.FinishedHeadingLabel=Ολοκλήρωση εγκατάστασης του [name]
+greek.FinishedLabel=Το [name] εγκαταστάθηκε. Άνοιξε την εφαρμογή από τη συντόμευση στην επιφάνεια εργασίας.
+greek.FinishedLabelNoIcons=Η εγκατάσταση του [name] ολοκληρώθηκε.
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -52,6 +88,9 @@ Filename: "{app}\RestaurantOrders.url"; Description: "Άνοιγμα RestaurantO
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\ServiceSetup.ps1"" -Action Uninstall -InstallDirectory ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveRestaurantOrdersService"
+
+[UninstallDelete]
+Type: files; Name: "{app}\Access.html"
 
 [Code]
 var
